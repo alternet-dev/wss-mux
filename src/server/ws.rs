@@ -7,11 +7,13 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
+use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::auth::{audience_admits, validate_token};
+use crate::auth::{audience_admits, validate_token, AuthError};
 use crate::connection::{ConnId, Outbound};
 use crate::envelope::ClientFrame;
+use crate::error::ProtocolError;
 use crate::server::AppState;
 
 pub const SUBPROTOCOL: &str = "wss-mux.v1";
@@ -44,9 +46,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let (writer, reader) = socket.split();
     let writer_task = tokio::spawn(writer_loop(writer, rx));
 
-    // Reader runs inline; it owns `tx` and emits Outbound::Close on exit so
-    // the writer sees an explicit shutdown signal rather than relying on
-    // channel-drop semantics alone.
     reader_loop(reader, conn_id, &state, tx).await;
 
     state.unregister_connection(conn_id);
@@ -83,9 +82,25 @@ async fn writer_loop(mut writer: SplitSink<WebSocket, Message>, mut rx: mpsc::Re
             }
         }
     }
-    // Channel drained without an explicit Close (shouldn't happen given the
-    // reader always emits one, but cover the fallback).
     let _ = writer.send(Message::Close(None)).await;
+}
+
+/// Two-stage parse: any failure to read the JSON body is `bad_frame`; a
+/// successfully parsed body with an unrecognized `type` field is
+/// `unknown_frame_type`. Keeping these distinguishable is what
+/// `docs/protocol.md` requires.
+fn parse_client_frame(text: &str) -> Result<ClientFrame, ProtocolError> {
+    let value: Value = serde_json::from_str(text).map_err(|_| ProtocolError::BadFrame)?;
+    let type_str = value
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(ProtocolError::BadFrame)?;
+    match type_str {
+        "auth" | "subscribe" | "unsubscribe" => {
+            serde_json::from_value(value).map_err(|_| ProtocolError::BadFrame)
+        }
+        _ => Err(ProtocolError::UnknownFrameType),
+    }
 }
 
 async fn reader_loop(
@@ -97,14 +112,27 @@ async fn reader_loop(
     let mut principals: Option<Vec<String>> = None;
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
 
+    let mut explicit_close = false;
+
     while let Some(msg) = reader.next().await {
         let text = match msg {
             Ok(Message::Text(t)) => t,
+            Ok(Message::Binary(_)) => {
+                let _ = tx.try_send(ProtocolError::BadFrame.to_outbound());
+                explicit_close = true;
+                break;
+            }
             Ok(Message::Close(_)) | Err(_) => break,
             Ok(_) => continue,
         };
-        let Ok(frame) = serde_json::from_str::<ClientFrame>(text.as_str()) else {
-            break;
+
+        let frame = match parse_client_frame(text.as_str()) {
+            Ok(f) => f,
+            Err(err) => {
+                let _ = tx.try_send(err.to_outbound());
+                explicit_close = true;
+                break;
+            }
         };
 
         match frame {
@@ -117,14 +145,28 @@ async fn reader_loop(
                         tracing::debug!(conn_id, sub = %claims.sub, "authenticated");
                         principals = Some(claims.principals);
                     }
-                    Err(err) => {
-                        tracing::debug!(conn_id, ?err, "auth failed; closing");
+                    Err(AuthError::Expired) => {
+                        let _ = tx.try_send(ProtocolError::ExpiredToken.to_outbound());
+                        explicit_close = true;
+                        break;
+                    }
+                    Err(AuthError::Invalid(_)) => {
+                        let _ =
+                            tx.try_send(ProtocolError::Unauthenticated { id: None }.to_outbound());
+                        explicit_close = true;
                         break;
                     }
                 }
             }
             ClientFrame::Subscribe { id, stream, key } => {
                 let Some(p) = principals.as_ref() else {
+                    let _ = tx.try_send(
+                        ProtocolError::Unauthenticated {
+                            id: Some(id.clone()),
+                        }
+                        .to_outbound(),
+                    );
+                    explicit_close = true;
                     break;
                 };
                 let Some(audience) = state
@@ -132,12 +174,16 @@ async fn reader_loop(
                     .and_then(|m| m.stream(&stream))
                     .map(|s| s.audience.clone())
                 else {
+                    let _ = tx.try_send(ProtocolError::UnknownStream { id }.to_outbound());
                     continue;
                 };
                 if !audience_admits(p, &audience) {
+                    let _ = tx.try_send(ProtocolError::UnauthorizedSubscribe { id }.to_outbound());
                     continue;
                 }
                 if subs.contains_key(&id) {
+                    let _ =
+                        tx.try_send(ProtocolError::DuplicateSubscriptionId { id }.to_outbound());
                     continue;
                 }
                 state
@@ -149,20 +195,16 @@ async fn reader_loop(
                 if let Some((stream, _)) = subs.remove(&id) {
                     state.registry().unsubscribe(&stream, conn_id, &id);
                 }
+                // Idempotent — no error for unknown ids (per docs/protocol.md).
             }
         }
     }
 
-    // Cleanup registry bindings for this connection.
     for (sub_id, (stream, _)) in &subs {
         state.registry().unsubscribe(stream, conn_id, sub_id);
     }
 
-    // Signal the writer to send a close frame. try_send avoids blocking if
-    // the writer has already exited (e.g. socket died on the send side); in
-    // that case the close attempt is moot.
-    let _ = tx.try_send(Outbound::normal_close());
-
-    // tx drops here, removing one sender. AppState still holds a clone; the
-    // caller drops that via unregister_connection.
+    if !explicit_close {
+        let _ = tx.try_send(Outbound::normal_close());
+    }
 }
