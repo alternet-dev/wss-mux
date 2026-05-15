@@ -1,20 +1,10 @@
-use std::net::SocketAddr;
+use wss_mux::server::AppState;
 
-use tokio::net::TcpListener;
-use wss_mux::server::build_app;
-
-async fn spawn_server() -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, build_app()).await.unwrap();
-    });
-    addr
-}
+use crate::common::spawn_server;
 
 #[tokio::test]
-async fn healthz_returns_200() {
-    let addr = spawn_server().await;
+async fn healthz_returns_200_without_manifest() {
+    let addr = spawn_server(AppState::new()).await;
     let resp = reqwest::get(format!("http://{addr}/healthz"))
         .await
         .expect("request");
@@ -23,7 +13,7 @@ async fn healthz_returns_200() {
 
 #[tokio::test]
 async fn healthz_body_is_ok() {
-    let addr = spawn_server().await;
+    let addr = spawn_server(AppState::new()).await;
     let body = reqwest::get(format!("http://{addr}/healthz"))
         .await
         .expect("request")
