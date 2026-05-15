@@ -1,6 +1,7 @@
-use std::net::SocketAddr;
-
 use tokio::net::TcpListener;
+use wss_mux::config::Config;
+use wss_mux::manifest::Manifest;
+use wss_mux::server::{build_app, AppState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -11,14 +12,18 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let addr: SocketAddr = std::env::var("WSS_MUX_LISTEN_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
-        .parse()?;
+    let config = Config::from_env()?;
+    let manifest = Manifest::load(&config.manifest_path)?;
+    tracing::info!(streams = manifest.streams.len(), "manifest loaded");
 
-    let listener = TcpListener::bind(addr).await?;
-    let bound = listener.local_addr()?;
-    tracing::info!(addr = %bound, "wss-mux listening");
+    let state = AppState::new();
+    state
+        .set_manifest(manifest)
+        .expect("manifest set exactly once at startup");
 
-    axum::serve(listener, wss_mux::server::build_app()).await?;
+    let listener = TcpListener::bind(config.listen_addr).await?;
+    tracing::info!(addr = %listener.local_addr()?, "wss-mux listening");
+
+    axum::serve(listener, build_app(state)).await?;
     Ok(())
 }
