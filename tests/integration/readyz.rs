@@ -1,10 +1,8 @@
-use wss_mux::server::AppState;
-
-use crate::common::{sample_manifest, spawn_server};
+use crate::common::{spawn_server, test_state, test_state_with_manifest};
 
 #[tokio::test]
 async fn readyz_is_503_before_manifest() {
-    let addr = spawn_server(AppState::new()).await;
+    let addr = spawn_server(test_state()).await;
     let resp = reqwest::get(format!("http://{addr}/readyz"))
         .await
         .expect("request");
@@ -15,9 +13,7 @@ async fn readyz_is_503_before_manifest() {
 
 #[tokio::test]
 async fn readyz_is_200_after_manifest() {
-    let state = AppState::new();
-    state.set_manifest(sample_manifest()).expect("set");
-    let addr = spawn_server(state).await;
+    let addr = spawn_server(test_state_with_manifest()).await;
     let resp = reqwest::get(format!("http://{addr}/readyz"))
         .await
         .expect("request");
