@@ -28,8 +28,13 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
         };
         match sender.try_send(Outbound::Frame(frame)) {
             Ok(()) => stats.delivered += 1,
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => stats.dropped_full += 1,
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => stats.dropped_closed += 1,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                stats.dropped_full += 1;
+                state.trigger_overflow(conn_id);
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                stats.dropped_closed += 1;
+            }
         }
     }
     stats

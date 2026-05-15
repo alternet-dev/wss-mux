@@ -12,6 +12,7 @@ use wss_mux::server::{build_app, AppState};
 pub const PUSH_TOKEN: &str = "test-push-token";
 pub const SIGNING_KEY: &str = "test-signing-key";
 
+#[allow(dead_code)]
 pub fn test_config() -> Config {
     Config {
         listen_addr: "127.0.0.1:0".parse().unwrap(),

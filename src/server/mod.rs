@@ -9,7 +9,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
 use dashmap::DashMap;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use crate::config::Config;
 use crate::connection::{ConnId, Outbound};
@@ -25,8 +25,17 @@ struct Inner {
     config: Config,
     manifest: OnceLock<Manifest>,
     registry: Registry,
-    connections: DashMap<ConnId, mpsc::Sender<Outbound>>,
+    connections: DashMap<ConnId, ConnectionHandle>,
     next_conn_id: AtomicU64,
+}
+
+/// Per-connection plumbing. The data channel carries normal outbound frames
+/// from the dispatcher and reader. The abort channel is a watch of `false`
+/// transitioning to `true` exactly once, signaling the reader and writer to
+/// short-circuit out of their loops for an overflow close.
+struct ConnectionHandle {
+    data_tx: mpsc::Sender<Outbound>,
+    abort_tx: watch::Sender<bool>,
 }
 
 impl AppState {
@@ -62,8 +71,15 @@ impl AppState {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register_connection(&self, conn_id: ConnId, sender: mpsc::Sender<Outbound>) {
-        self.inner.connections.insert(conn_id, sender);
+    pub fn register_connection(
+        &self,
+        conn_id: ConnId,
+        data_tx: mpsc::Sender<Outbound>,
+        abort_tx: watch::Sender<bool>,
+    ) {
+        self.inner
+            .connections
+            .insert(conn_id, ConnectionHandle { data_tx, abort_tx });
     }
 
     pub fn unregister_connection(&self, conn_id: ConnId) {
@@ -71,7 +87,19 @@ impl AppState {
     }
 
     pub fn sender(&self, conn_id: ConnId) -> Option<mpsc::Sender<Outbound>> {
-        self.inner.connections.get(&conn_id).map(|e| e.clone())
+        self.inner
+            .connections
+            .get(&conn_id)
+            .map(|e| e.data_tx.clone())
+    }
+
+    /// Atomically remove the connection from the registry of senders and
+    /// flip its abort signal to `true`. Idempotent — a second call for the
+    /// same conn_id is a no-op.
+    pub fn trigger_overflow(&self, conn_id: ConnId) {
+        if let Some((_, handle)) = self.inner.connections.remove(&conn_id) {
+            let _ = handle.abort_tx.send(true);
+        }
     }
 }
 
