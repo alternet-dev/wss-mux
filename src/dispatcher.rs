@@ -1,3 +1,4 @@
+use crate::connection::Outbound;
 use crate::envelope::{EventEnvelope, ServerFrame};
 use crate::server::AppState;
 
@@ -25,7 +26,7 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
             key: envelope.key.clone(),
             payload: envelope.payload.clone(),
         };
-        match sender.try_send(frame) {
+        match sender.try_send(Outbound::Frame(frame)) {
             Ok(()) => stats.delivered += 1,
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => stats.dropped_full += 1,
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => stats.dropped_closed += 1,

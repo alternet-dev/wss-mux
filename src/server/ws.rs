@@ -1,15 +1,17 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 
 use crate::auth::{audience_admits, validate_token};
-use crate::connection::ConnId;
-use crate::envelope::{ClientFrame, ServerFrame};
+use crate::connection::{ConnId, Outbound};
+use crate::envelope::ClientFrame;
 use crate::server::AppState;
 
 pub const SUBPROTOCOL: &str = "wss-mux.v1";
@@ -36,37 +38,61 @@ fn client_offers_subprotocol(headers: &HeaderMap) -> bool {
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let conn_id = state.next_conn_id();
-    let (tx, rx) = mpsc::channel::<ServerFrame>(state.config().queue_depth);
+    let (tx, rx) = mpsc::channel::<Outbound>(state.config().queue_depth);
     state.register_connection(conn_id, tx.clone());
 
     let (writer, reader) = socket.split();
     let writer_task = tokio::spawn(writer_loop(writer, rx));
-    reader_loop(reader, conn_id, state.clone()).await;
+
+    // Reader runs inline; it owns `tx` and emits Outbound::Close on exit so
+    // the writer sees an explicit shutdown signal rather than relying on
+    // channel-drop semantics alone.
+    reader_loop(reader, conn_id, &state, tx).await;
 
     state.unregister_connection(conn_id);
-    drop(tx);
     let _ = writer_task.await;
 }
 
-async fn writer_loop(
-    mut writer: futures_util::stream::SplitSink<WebSocket, Message>,
-    mut rx: mpsc::Receiver<ServerFrame>,
-) {
-    while let Some(frame) = rx.recv().await {
-        let Ok(json) = serde_json::to_string(&frame) else {
-            continue;
-        };
-        if writer.send(Message::Text(json)).await.is_err() {
-            break;
+async fn writer_loop(mut writer: SplitSink<WebSocket, Message>, mut rx: mpsc::Receiver<Outbound>) {
+    while let Some(out) = rx.recv().await {
+        match out {
+            Outbound::Frame(frame) => {
+                let Ok(json) = serde_json::to_string(&frame) else {
+                    continue;
+                };
+                if writer.send(Message::Text(json)).await.is_err() {
+                    return;
+                }
+            }
+            Outbound::Close {
+                code,
+                reason,
+                frame,
+            } => {
+                if let Some(frame) = frame {
+                    if let Ok(json) = serde_json::to_string(&frame) {
+                        let _ = writer.send(Message::Text(json)).await;
+                    }
+                }
+                let close = CloseFrame {
+                    code,
+                    reason: Cow::Owned(reason),
+                };
+                let _ = writer.send(Message::Close(Some(close))).await;
+                return;
+            }
         }
     }
-    let _ = writer.close().await;
+    // Channel drained without an explicit Close (shouldn't happen given the
+    // reader always emits one, but cover the fallback).
+    let _ = writer.send(Message::Close(None)).await;
 }
 
 async fn reader_loop(
-    mut reader: futures_util::stream::SplitStream<WebSocket>,
+    mut reader: SplitStream<WebSocket>,
     conn_id: ConnId,
-    state: AppState,
+    state: &AppState,
+    tx: mpsc::Sender<Outbound>,
 ) {
     let mut principals: Option<Vec<String>> = None;
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
@@ -127,7 +153,16 @@ async fn reader_loop(
         }
     }
 
+    // Cleanup registry bindings for this connection.
     for (sub_id, (stream, _)) in &subs {
         state.registry().unsubscribe(stream, conn_id, sub_id);
     }
+
+    // Signal the writer to send a close frame. try_send avoids blocking if
+    // the writer has already exited (e.g. socket died on the send side); in
+    // that case the close attempt is moot.
+    let _ = tx.try_send(Outbound::normal_close());
+
+    // tx drops here, removing one sender. AppState still holds a clone; the
+    // caller drops that via unregister_connection.
 }

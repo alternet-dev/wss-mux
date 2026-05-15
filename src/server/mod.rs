@@ -12,8 +12,7 @@ use dashmap::DashMap;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
-use crate::connection::ConnId;
-use crate::envelope::ServerFrame;
+use crate::connection::{ConnId, Outbound};
 use crate::manifest::Manifest;
 use crate::registry::Registry;
 
@@ -26,7 +25,7 @@ struct Inner {
     config: Config,
     manifest: OnceLock<Manifest>,
     registry: Registry,
-    connections: DashMap<ConnId, mpsc::Sender<ServerFrame>>,
+    connections: DashMap<ConnId, mpsc::Sender<Outbound>>,
     next_conn_id: AtomicU64,
 }
 
@@ -63,7 +62,7 @@ impl AppState {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register_connection(&self, conn_id: ConnId, sender: mpsc::Sender<ServerFrame>) {
+    pub fn register_connection(&self, conn_id: ConnId, sender: mpsc::Sender<Outbound>) {
         self.inner.connections.insert(conn_id, sender);
     }
 
@@ -71,7 +70,7 @@ impl AppState {
         self.inner.connections.remove(&conn_id);
     }
 
-    pub fn sender(&self, conn_id: ConnId) -> Option<mpsc::Sender<ServerFrame>> {
+    pub fn sender(&self, conn_id: ConnId) -> Option<mpsc::Sender<Outbound>> {
         self.inner.connections.get(&conn_id).map(|e| e.clone())
     }
 }
