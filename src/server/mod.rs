@@ -1,7 +1,3 @@
-pub mod http;
-pub mod metrics;
-pub mod ws;
-
 use axum::routing::get;
 use axum::Router;
 
