@@ -52,14 +52,24 @@ streams:
 }
 
 pub fn sign_token(principals: &[&str]) -> String {
-    let n = SystemTime::now()
+    sign_token_with_offsets(principals, 0, 300)
+}
+
+pub fn sign_token_with_offsets(
+    principals: &[&str],
+    iat_offset_secs: i64,
+    exp_offset_secs: i64,
+) -> String {
+    let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
-        .as_secs();
+        .as_secs() as i64;
+    let iat = (now + iat_offset_secs).max(0) as u64;
+    let exp = (now + exp_offset_secs).max(0) as u64;
     let claims = Claims {
         iss: "test".into(),
-        iat: n,
-        exp: n + 300,
+        iat,
+        exp,
         sub: "user:test".into(),
         principals: principals.iter().map(|s| (*s).to_string()).collect(),
     };
