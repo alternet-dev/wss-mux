@@ -7,9 +7,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use wss_mux::envelope::{ClientFrame, ServerFrame};
-use wss_mux::server::AppState;
 
-use crate::common::{sample_manifest, sign_token, spawn_server, test_config, PUSH_TOKEN};
+use crate::common::{sign_token, spawn_server, test_state_with_manifest};
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -42,12 +41,19 @@ async fn poll_until<F: FnMut() -> bool>(timeout: Duration, mut cond: F) -> bool 
     cond()
 }
 
+/// End-to-end test of the user-visible overflow behavior: when overflow is
+/// triggered for a connection, the client receives an `error{code:"overflow"}`
+/// text frame followed by a WebSocket close with code 4429, and the registry
+/// is cleaned up afterward.
+///
+/// We invoke `state.trigger_overflow` directly rather than racing the
+/// dispatcher's try_send against the OS TCP send buffer — that race depends
+/// on the platform's default SO_SNDBUF and is unreliable on Linux CI. The
+/// dispatcher's Full -> trigger_overflow wiring is covered by a unit test in
+/// `src/dispatcher.rs`.
 #[tokio::test]
 async fn overflow_emits_error_frame_and_closes_4429() {
-    let mut cfg = test_config();
-    cfg.queue_depth = 2;
-    let state = AppState::new(cfg);
-    state.set_manifest(sample_manifest()).expect("manifest");
+    let state = test_state_with_manifest();
     let addr = spawn_server(state.clone()).await;
 
     let mut ws = connect_ws(addr).await;
@@ -76,31 +82,15 @@ async fn overflow_emits_error_frame_and_closes_4429() {
         "subscription did not register"
     );
 
-    // Push events without reading. Large payloads + queue_depth=2 makes the
-    // mpsc fill quickly once the writer's TCP send buffer is full.
-    let http = reqwest::Client::new();
-    let big = "x".repeat(8192);
-    for i in 0..200 {
-        let _ = http
-            .post(format!("http://{addr}/v1/events"))
-            .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
-            .json(&serde_json::json!({
-                "stream": "chat_messages",
-                "payload": {"i": i, "data": &big}
-            }))
-            .send()
-            .await
-            .expect("push");
-    }
+    // First (and only) connection has conn_id 1; the AtomicU64 in AppState
+    // starts at 1.
+    state.trigger_overflow(1);
 
-    // Drain the client; expect (eventually) an overflow error frame and a
-    // close with code 4429. Up-front there may be some queued event frames.
     let mut saw_overflow = false;
     let mut close_code: Option<u16> = None;
-    let read_deadline = Instant::now() + Duration::from_secs(15);
-
-    while Instant::now() < read_deadline && close_code.is_none() {
-        let remaining = read_deadline.saturating_duration_since(Instant::now());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && close_code.is_none() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
         match tokio::time::timeout(remaining, ws.next()).await {
             Ok(Some(Ok(WsMessage::Text(t)))) => {
                 if let Ok(ServerFrame::Error { code, .. }) =
