@@ -9,6 +9,8 @@ pub const DEFAULT_QUEUE_DEPTH: usize = 1024;
 pub const DEFAULT_ENVELOPE_STREAM_PATH: &str = "stream";
 pub const DEFAULT_ENVELOPE_KEY_PATH: &str = "key";
 pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
+pub const DEFAULT_INBOUND_RATE: u32 = 50;
+pub const DEFAULT_INBOUND_BURST: u32 = 100;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -25,6 +27,12 @@ pub struct Config {
     pub envelope_key_path: String,
     /// Dotted path to the payload. Default `payload`.
     pub envelope_payload_path: String,
+    /// Inbound client-frame rate limit (frames/sec/connection). `0`
+    /// disables rate limiting entirely.
+    pub inbound_rate_per_sec: u32,
+    /// Token-bucket capacity — the largest instantaneous burst allowed
+    /// before the steady rate applies.
+    pub inbound_burst: u32,
 }
 
 #[derive(Debug, Error)]
@@ -45,6 +53,13 @@ pub enum ConfigError {
     },
     #[error("WSS_MUX_QUEUE_DEPTH must be greater than zero")]
     ZeroQueueDepth,
+    #[error("invalid {var} `{value}`: {source}")]
+    InvalidUnsigned {
+        var: &'static str,
+        value: String,
+        #[source]
+        source: ParseIntError,
+    },
 }
 
 impl Config {
@@ -96,6 +111,19 @@ impl Config {
         let envelope_payload_path = get("WSS_MUX_ENVELOPE_PAYLOAD_PATH")
             .unwrap_or_else(|| DEFAULT_ENVELOPE_PAYLOAD_PATH.to_string());
 
+        let parse_u32 = |var: &'static str, default: u32| -> Result<u32, ConfigError> {
+            match get(var) {
+                Some(v) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
+                    var,
+                    value: v.clone(),
+                    source,
+                }),
+                None => Ok(default),
+            }
+        };
+        let inbound_rate_per_sec = parse_u32("WSS_MUX_INBOUND_RATE", DEFAULT_INBOUND_RATE)?;
+        let inbound_burst = parse_u32("WSS_MUX_INBOUND_BURST", DEFAULT_INBOUND_BURST)?;
+
         Ok(Config {
             listen_addr,
             push_auth_token,
@@ -105,6 +133,8 @@ impl Config {
             envelope_stream_path,
             envelope_key_path,
             envelope_payload_path,
+            inbound_rate_per_sec,
+            inbound_burst,
         })
     }
 }
@@ -152,6 +182,34 @@ mod tests {
         assert_eq!(cfg.envelope_stream_path, "meta.topic");
         assert_eq!(cfg.envelope_key_path, "meta.room");
         assert_eq!(cfg.envelope_payload_path, "data");
+    }
+
+    #[test]
+    fn inbound_rate_defaults_and_overrides() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert_eq!(cfg.inbound_rate_per_sec, DEFAULT_INBOUND_RATE);
+        assert_eq!(cfg.inbound_burst, DEFAULT_INBOUND_BURST);
+
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_INBOUND_RATE", "0"));
+        pairs.push(("WSS_MUX_INBOUND_BURST", "5"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.inbound_rate_per_sec, 0);
+        assert_eq!(cfg.inbound_burst, 5);
+    }
+
+    #[test]
+    fn invalid_inbound_rate_is_error() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_INBOUND_RATE", "fast"));
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_INBOUND_RATE",
+                ..
+            }
+        ));
     }
 
     #[test]

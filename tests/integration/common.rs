@@ -29,6 +29,10 @@ pub fn test_config() -> Config {
         envelope_stream_path: "stream".into(),
         envelope_key_path: "key".into(),
         envelope_payload_path: "payload".into(),
+        // Rate limiting off by default so the existing fast-sending tests
+        // aren't throttled; the rate-limit suite builds its own config.
+        inbound_rate_per_sec: 0,
+        inbound_burst: 0,
     }
 }
 

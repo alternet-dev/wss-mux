@@ -105,6 +105,8 @@ mod tests {
             envelope_stream_path: "stream".into(),
             envelope_key_path: "key".into(),
             envelope_payload_path: "payload".into(),
+            inbound_rate_per_sec: 0,
+            inbound_burst: 0,
         }
     }
 

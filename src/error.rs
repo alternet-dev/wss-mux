@@ -12,6 +12,7 @@ pub enum ProtocolError {
     UnknownStream { id: String },
     UnauthorizedSubscribe { id: String },
     DuplicateSubscriptionId { id: String },
+    RateLimited { id: Option<String> },
 }
 
 impl ProtocolError {
@@ -24,6 +25,7 @@ impl ProtocolError {
             Self::UnknownStream { .. } => "unknown_stream",
             Self::UnauthorizedSubscribe { .. } => "unauthorized_subscribe",
             Self::DuplicateSubscriptionId { .. } => "duplicate_subscription_id",
+            Self::RateLimited { .. } => "rate_limited",
         }
     }
 
@@ -36,6 +38,7 @@ impl ProtocolError {
             Self::UnknownStream { .. } => "stream not declared in manifest",
             Self::UnauthorizedSubscribe { .. } => "principals do not intersect stream audience",
             Self::DuplicateSubscriptionId { .. } => "subscription id already in use",
+            Self::RateLimited { .. } => "inbound frame rate limit exceeded",
         }
     }
 
@@ -44,7 +47,7 @@ impl ProtocolError {
     /// a specific frame, absent otherwise").
     pub fn id(&self) -> Option<&str> {
         match self {
-            Self::Unauthenticated { id } => id.as_deref(),
+            Self::Unauthenticated { id } | Self::RateLimited { id } => id.as_deref(),
             Self::UnknownStream { id }
             | Self::UnauthorizedSubscribe { id }
             | Self::DuplicateSubscriptionId { id } => Some(id),
@@ -115,6 +118,20 @@ mod tests {
             ProtocolError::DuplicateSubscriptionId { id: "x".into() }.close_code(),
             None
         );
+        assert_eq!(ProtocolError::RateLimited { id: None }.close_code(), None);
+    }
+
+    #[test]
+    fn rate_limited_is_keep_open_and_echoes_id() {
+        let err = ProtocolError::RateLimited {
+            id: Some("s9".into()),
+        };
+        assert_eq!(err.code(), "rate_limited");
+        assert!(matches!(err.to_outbound(), Outbound::Frame(_)));
+        let ServerFrame::Error { id, .. } = err.to_frame() else {
+            unreachable!()
+        };
+        assert_eq!(id.as_deref(), Some("s9"));
     }
 
     #[test]

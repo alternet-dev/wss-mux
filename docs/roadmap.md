@@ -36,7 +36,9 @@ Out of scope:
   and `key`, so producers don't have to use exactly those field
   names).~~ Shipped. Dotted paths for stream/key/payload via
   `WSS_MUX_ENVELOPE_*_PATH`; defaults reproduce the classic body.
-- Per-connection rate limits (token bucket).
+- ~~Per-connection rate limits (token bucket).~~ Shipped. Inbound
+  frame token bucket; `WSS_MUX_INBOUND_RATE`/`_BURST`; `rate_limited`
+  keep-open error.
 - Binary frame opt-in (CBOR or MessagePack payload framing).
 
 ## v0.3

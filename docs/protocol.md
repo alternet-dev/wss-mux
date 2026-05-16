@@ -106,11 +106,19 @@ otherwise.
 | `unknown_stream` | subscribe to a stream not in the manifest | no |
 | `unauthorized_subscribe` | principals do not intersect stream audience | no |
 | `duplicate_subscription_id` | subscribe with an `id` already in use | no |
+| `rate_limited` | inbound frame rate limit exceeded | no |
 | `overflow` | per-connection send queue overflowed | yes |
 
 Errors that close the connection use WebSocket close code `4xxx`
 matching the error semantically (`4400` bad frame, `4401`
 unauthenticated, `4429` overflow).
+
+`rate_limited` is keep-open: the offending frame is dropped (not
+processed), an `error` frame is returned (echoing the frame's `id`
+when it has one), and the connection stays usable. The limiter is a
+per-connection token bucket; see `WSS_MUX_INBOUND_RATE` /
+`WSS_MUX_INBOUND_BURST` in `docs/embedding.md`. Rate limiting is off
+when `WSS_MUX_INBOUND_RATE` is `0`.
 
 ## Connection lifecycle
 
