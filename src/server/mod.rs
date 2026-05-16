@@ -1,5 +1,8 @@
 pub mod http;
+pub mod metrics;
 pub mod ws;
+
+use self::metrics::Metrics;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -27,6 +30,7 @@ struct Inner {
     registry: Registry,
     connections: DashMap<ConnId, ConnectionHandle>,
     next_conn_id: AtomicU64,
+    metrics: Metrics,
 }
 
 /// Per-connection plumbing. The data channel carries normal outbound frames
@@ -47,8 +51,13 @@ impl AppState {
                 registry: Registry::new(),
                 connections: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
+                metrics: Metrics::default(),
             }),
         }
+    }
+
+    pub fn metrics(&self) -> &Metrics {
+        &self.inner.metrics
     }
 
     pub fn config(&self) -> &Config {
@@ -107,6 +116,7 @@ pub fn build_app(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(http::metrics))
         .route("/v1/events", post(http::push_event))
         .route("/v1/events/batch", post(http::push_batch))
         .route("/v1/stream", get(ws::ws_handler))

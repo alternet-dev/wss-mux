@@ -1,5 +1,6 @@
 use crate::connection::Outbound;
 use crate::envelope::{EventEnvelope, ServerFrame};
+use crate::server::metrics::{DropReason, DropReasonLabel, StreamLabel};
 use crate::server::AppState;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -15,11 +16,37 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
         .registry()
         .matches(&envelope.stream, envelope.key.as_deref());
 
+    if matches.is_empty() {
+        state
+            .metrics()
+            .events_dropped
+            .get_or_create(&DropReasonLabel {
+                reason: DropReason::NoSubscribers,
+            })
+            .inc();
+        return stats;
+    }
+
+    let stream_label = StreamLabel {
+        stream: envelope.stream.clone(),
+    };
+
     for (conn_id, sub_id) in matches {
         let Some(sender) = state.sender(conn_id) else {
             stats.dropped_closed += 1;
+            state
+                .metrics()
+                .events_dropped
+                .get_or_create(&DropReasonLabel {
+                    reason: DropReason::ChannelClosed,
+                })
+                .inc();
             continue;
         };
+
+        let queue_used = state.config().queue_depth.saturating_sub(sender.capacity());
+        state.metrics().send_queue_depth.observe(queue_used as f64);
+
         let frame = ServerFrame::Event {
             id: sub_id,
             stream: envelope.stream.clone(),
@@ -27,13 +54,34 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
             payload: envelope.payload.clone(),
         };
         match sender.try_send(Outbound::Frame(frame)) {
-            Ok(()) => stats.delivered += 1,
+            Ok(()) => {
+                stats.delivered += 1;
+                state
+                    .metrics()
+                    .events_dispatched
+                    .get_or_create(&stream_label)
+                    .inc();
+            }
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 stats.dropped_full += 1;
+                state
+                    .metrics()
+                    .events_dropped
+                    .get_or_create(&DropReasonLabel {
+                        reason: DropReason::Overflow,
+                    })
+                    .inc();
                 state.trigger_overflow(conn_id);
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
                 stats.dropped_closed += 1;
+                state
+                    .metrics()
+                    .events_dropped
+                    .get_or_create(&DropReasonLabel {
+                        reason: DropReason::ChannelClosed,
+                    })
+                    .inc();
             }
         }
     }
@@ -145,5 +193,27 @@ mod tests {
             panic!("expected event frame");
         };
         assert_eq!(id, "s1");
+    }
+
+    #[test]
+    fn no_subscribers_increments_dropped_metric() {
+        let state = AppState::new(test_config(8));
+
+        let stats = dispatch(
+            &state,
+            EventEnvelope {
+                stream: "chat_messages".into(),
+                key: None,
+                payload: json!({}),
+            },
+        );
+
+        assert_eq!(stats.delivered, 0);
+        // Verify metric incremented by encoding and string-checking.
+        let body = state.metrics().encode();
+        assert!(
+            body.contains("wss_mux_events_dropped_total{reason=\"no_subscribers\"} 1"),
+            "expected no_subscribers drop in metrics body, got:\n{body}"
+        );
     }
 }
