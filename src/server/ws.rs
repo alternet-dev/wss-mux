@@ -44,12 +44,16 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let (abort_tx, abort_rx) = watch::channel(false);
     state.register_connection(conn_id, data_tx.clone(), abort_tx);
 
+    state.metrics().connections_total.inc();
+    state.metrics().connections_active.inc();
+
     let (writer, reader) = socket.split();
     let writer_task = tokio::spawn(writer_loop(writer, data_rx, abort_rx.clone()));
 
     reader_loop(reader, conn_id, &state, data_tx, abort_rx).await;
 
     state.unregister_connection(conn_id);
+    state.metrics().connections_active.dec();
     let _ = writer_task.await;
 }
 
@@ -239,11 +243,13 @@ async fn reader_loop(
                 state
                     .registry()
                     .subscribe(&stream, conn_id, id.clone(), key.clone());
+                state.metrics().subscriptions_active.inc();
                 subs.insert(id, (stream, key));
             }
             ClientFrame::Unsubscribe { id } => {
                 if let Some((stream, _)) = subs.remove(&id) {
                     state.registry().unsubscribe(&stream, conn_id, &id);
+                    state.metrics().subscriptions_active.dec();
                 }
             }
         }
@@ -251,6 +257,7 @@ async fn reader_loop(
 
     for (sub_id, (stream, _)) in &subs {
         state.registry().unsubscribe(stream, conn_id, sub_id);
+        state.metrics().subscriptions_active.dec();
     }
 
     // If we exited via the abort path, the writer is already taking care of

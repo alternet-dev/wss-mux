@@ -1,11 +1,23 @@
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::dispatcher::dispatch;
 use crate::envelope::EventEnvelope;
 use crate::server::AppState;
+
+pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
+    let body = state.metrics().encode();
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/openmetrics-text; version=1.0.0; charset=utf-8",
+        )],
+        body,
+    )
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct BatchEnvelope {
