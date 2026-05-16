@@ -1,46 +1,13 @@
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
+use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use wss_mux::envelope::{ClientFrame, ServerFrame};
 
-use crate::common::{sign_token, spawn_server, test_state_with_manifest, PUSH_TOKEN};
-
-type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-async fn connect_ws(addr: SocketAddr) -> Ws {
-    let url = format!("ws://{addr}/v1/stream");
-    let mut req = url.into_client_request().expect("request");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        "wss-mux.v1".parse().expect("header"),
-    );
-    let (stream, _) = tokio_tungstenite::connect_async(req)
-        .await
-        .expect("connect");
-    stream
-}
-
-async fn send_frame(ws: &mut Ws, frame: &ClientFrame) {
-    let json = serde_json::to_string(frame).expect("serialize");
-    ws.send(WsMessage::Text(json)).await.expect("send");
-}
-
-async fn recv_event(ws: &mut Ws) -> ServerFrame {
-    let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
-        .await
-        .expect("recv timed out")
-        .expect("stream ended")
-        .expect("recv error");
-    match msg {
-        WsMessage::Text(t) => serde_json::from_str(t.as_str()).expect("parse frame"),
-        other => panic!("expected text frame, got {other:?}"),
-    }
-}
+use crate::common::{
+    connect_ws, poll_until, recv_event, send_frame, sign_token, spawn_server,
+    test_state_with_manifest, PUSH_TOKEN,
+};
 
 #[tokio::test]
 async fn push_event_fans_out_to_subscribed_clients() {
@@ -50,47 +17,32 @@ async fn push_event_fans_out_to_subscribed_clients() {
     let mut client_a = connect_ws(addr).await;
     let mut client_b = connect_ws(addr).await;
 
-    send_frame(
-        &mut client_a,
-        &ClientFrame::Auth {
-            token: sign_token(&["role:member"]),
-        },
-    )
-    .await;
-    send_frame(
-        &mut client_b,
-        &ClientFrame::Auth {
-            token: sign_token(&["role:member"]),
-        },
-    )
-    .await;
-
-    send_frame(
-        &mut client_a,
-        &ClientFrame::Subscribe {
-            id: "s1".into(),
-            stream: "chat_messages".into(),
-            key: Some("room-42".into()),
-        },
-    )
-    .await;
-    send_frame(
-        &mut client_b,
-        &ClientFrame::Subscribe {
-            id: "s1".into(),
-            stream: "chat_messages".into(),
-            key: Some("room-42".into()),
-        },
-    )
-    .await;
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while state.registry().binding_count("chat_messages") < 2 {
-        if Instant::now() > deadline {
-            panic!("subscriptions did not register within 2s");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    for client in [&mut client_a, &mut client_b] {
+        send_frame(
+            client,
+            &ClientFrame::Auth {
+                token: sign_token(&["role:member"]),
+            },
+        )
+        .await;
+        send_frame(
+            client,
+            &ClientFrame::Subscribe {
+                id: "s1".into(),
+                stream: "chat_messages".into(),
+                key: Some("room-42".into()),
+            },
+        )
+        .await;
     }
+
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state.registry().binding_count("chat_messages") >= 2
+        })
+        .await,
+        "subscriptions did not register"
+    );
 
     let http = reqwest::Client::new();
     let resp = http
@@ -106,10 +58,8 @@ async fn push_event_fans_out_to_subscribed_clients() {
         .expect("push");
     assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
 
-    let event_a = recv_event(&mut client_a).await;
-    let event_b = recv_event(&mut client_b).await;
-
-    for event in [&event_a, &event_b] {
+    for client in [&mut client_a, &mut client_b] {
+        let event = recv_event(client).await;
         let ServerFrame::Event {
             id,
             stream,
@@ -205,13 +155,12 @@ async fn batch_push_delivers_all_events() {
     )
     .await;
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while state.registry().binding_count("chat_messages") < 1 {
-        if Instant::now() > deadline {
-            panic!("subscription did not register");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state.registry().binding_count("chat_messages") >= 1
+        })
+        .await
+    );
 
     let http = reqwest::Client::new();
     let resp = http
@@ -262,7 +211,6 @@ async fn batch_push_with_unknown_stream_in_any_event_is_404() {
     let state = test_state_with_manifest();
     let addr = spawn_server(state.clone()).await;
 
-    // Subscribe so we'd see deliveries if any leaked through.
     let mut ws = connect_ws(addr).await;
     send_frame(
         &mut ws,
@@ -280,14 +228,12 @@ async fn batch_push_with_unknown_stream_in_any_event_is_404() {
         },
     )
     .await;
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while state.registry().binding_count("chat_messages") < 1 {
-        if Instant::now() > deadline {
-            panic!("subscription did not register");
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state.registry().binding_count("chat_messages") >= 1
+        })
+        .await
+    );
 
     let http = reqwest::Client::new();
     let resp = http
@@ -304,8 +250,6 @@ async fn batch_push_with_unknown_stream_in_any_event_is_404() {
         .expect("push");
     assert_eq!(resp.status(), reqwest::StatusCode::NOT_FOUND);
 
-    // No event should have been dispatched (all-or-nothing). Give the
-    // server a moment, then verify nothing arrived.
     let timeout_res = tokio::time::timeout(Duration::from_millis(200), ws.next()).await;
     assert!(
         timeout_res.is_err(),
@@ -319,7 +263,6 @@ async fn batch_push_with_malformed_envelope_is_400() {
     let addr = spawn_server(state).await;
 
     let http = reqwest::Client::new();
-    // Missing required `stream` field in one event.
     let resp = http
         .post(format!("http://{addr}/v1/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))

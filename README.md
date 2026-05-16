@@ -60,6 +60,8 @@ It IS NOT:
 
 ## Quick start
 
+From source:
+
 ```bash
 cargo build --release
 
@@ -68,6 +70,17 @@ WSS_MUX_PUSH_AUTH_TOKEN=<secret> \
 WSS_MUX_HANDSHAKE_SIGNING_KEY=<secret> \
 WSS_MUX_STREAMS_MANIFEST_PATH=./streams.yaml \
 ./target/release/wss-mux
+```
+
+Or via the prebuilt multi-arch container:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e WSS_MUX_PUSH_AUTH_TOKEN=<secret> \
+  -e WSS_MUX_HANDSHAKE_SIGNING_KEY=<secret> \
+  -e WSS_MUX_STREAMS_MANIFEST_PATH=/etc/wss-mux/streams.yaml \
+  -v $(pwd)/streams.yaml:/etc/wss-mux/streams.yaml:ro \
+  ghcr.io/alternet-dev/wss-mux:latest
 ```
 
 `streams.yaml`:
