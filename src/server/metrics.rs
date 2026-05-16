@@ -36,6 +36,46 @@ impl EncodeLabelValue for DropReason {
     }
 }
 
+#[derive(Clone, Hash, PartialEq, Eq, Debug, EncodeLabelSet)]
+pub struct ReloadResultLabel {
+    pub result: ReloadResult,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub enum ReloadResult {
+    Ok,
+    Error,
+}
+
+impl EncodeLabelValue for ReloadResult {
+    fn encode(&self, encoder: &mut LabelValueEncoder<'_>) -> Result<(), std::fmt::Error> {
+        encoder.write_str(match self {
+            Self::Ok => "ok",
+            Self::Error => "error",
+        })
+    }
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug, EncodeLabelSet)]
+pub struct RevokeReasonLabel {
+    pub reason: RevokeReason,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub enum RevokeReason {
+    UnknownStream,
+    Unauthorized,
+}
+
+impl EncodeLabelValue for RevokeReason {
+    fn encode(&self, encoder: &mut LabelValueEncoder<'_>) -> Result<(), std::fmt::Error> {
+        encoder.write_str(match self {
+            Self::UnknownStream => "unknown_stream",
+            Self::Unauthorized => "unauthorized",
+        })
+    }
+}
+
 pub struct Metrics {
     registry: Mutex<Registry>,
     pub connections_total: Counter,
@@ -44,6 +84,8 @@ pub struct Metrics {
     pub events_dispatched: Family<StreamLabel, Counter>,
     pub events_dropped: Family<DropReasonLabel, Counter>,
     pub send_queue_depth: Histogram,
+    pub manifest_reloads: Family<ReloadResultLabel, Counter>,
+    pub subscriptions_revoked: Family<RevokeReasonLabel, Counter>,
 }
 
 impl Default for Metrics {
@@ -56,6 +98,8 @@ impl Default for Metrics {
         let events_dispatched = Family::<StreamLabel, Counter>::default();
         let events_dropped = Family::<DropReasonLabel, Counter>::default();
         let send_queue_depth = Histogram::new([1.0, 4.0, 16.0, 64.0, 256.0, 1024.0].into_iter());
+        let manifest_reloads = Family::<ReloadResultLabel, Counter>::default();
+        let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
 
         registry.register(
             "wss_mux_connections",
@@ -87,6 +131,16 @@ impl Default for Metrics {
             "Per-connection send queue occupancy observed at dispatch time",
             send_queue_depth.clone(),
         );
+        registry.register(
+            "wss_mux_manifest_reloads",
+            "Manifest reload attempts, labeled by result",
+            manifest_reloads.clone(),
+        );
+        registry.register(
+            "wss_mux_subscriptions_revoked",
+            "Subscriptions dropped by a hot-reload re-validation, by reason",
+            subscriptions_revoked.clone(),
+        );
 
         Self {
             registry: Mutex::new(registry),
@@ -96,6 +150,8 @@ impl Default for Metrics {
             events_dispatched,
             events_dropped,
             send_queue_depth,
+            manifest_reloads,
+            subscriptions_revoked,
         }
     }
 }

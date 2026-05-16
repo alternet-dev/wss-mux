@@ -84,19 +84,35 @@ plus the manifest.
 
 ### Manifest
 
-Loaded once at startup from a YAML file. Validated:
+Loaded at startup from a YAML file. Validated:
 
 - Version `1`.
 - Every stream has a non-empty audience.
 - No duplicate stream names.
 
-Reloadable on `SIGHUP` (planned for v0.2).
+**Hot-reload (`SIGHUP`).** Sending `SIGHUP` re-reads and re-validates the
+manifest file. A successful reload atomically swaps the in-memory manifest
+(stored behind a `tokio::sync::watch`, so reads stay cheap and connections
+get a change signal). A failed reload (missing file, invalid schema) is
+logged and metered (`wss_mux_manifest_reloads_total{result="error"}`) but
+the previous manifest keeps serving — a bad edit never takes the process
+down.
+
+On reload, every connection re-validates its active subscriptions against
+the new manifest. A subscription whose stream was removed, or whose
+stream's audience no longer intersects the connection's principals, is
+revoked: the client receives an `error` frame (`unknown_stream` or
+`unauthorized_subscribe`, carrying the subscription `id`), the binding is
+dropped from the registry, and `wss_mux_subscriptions_revoked_total` is
+incremented. The connection itself stays open — unaffected subscriptions
+on it keep working, and the client may re-subscribe.
 
 ## Concurrency model
 
 - One tokio task per connection per direction (read, write).
 - One shared `Arc<Registry>` (using a concurrent map like `DashMap`).
-- One shared `Arc<Manifest>` — immutable between reloads.
+- One `watch`-held `Arc<Manifest>` — immutable between `SIGHUP` reloads;
+  a reload swaps the `Arc` atomically.
 - HTTP and WebSocket share the listen port (the HTTP server upgrades
   on the WebSocket path).
 
