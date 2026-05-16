@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -14,6 +15,8 @@ use crate::auth::{audience_admits, validate_token, AuthError};
 use crate::connection::{ConnId, Outbound};
 use crate::envelope::{ClientFrame, ServerFrame};
 use crate::error::ProtocolError;
+use crate::manifest::Manifest;
+use crate::server::metrics::{RevokeReason, RevokeReasonLabel};
 use crate::server::AppState;
 
 pub const SUBPROTOCOL: &str = "wss-mux.v1";
@@ -47,10 +50,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     state.metrics().connections_total.inc();
     state.metrics().connections_active.inc();
 
+    let manifest_rx = state.subscribe_manifest();
+
     let (writer, reader) = socket.split();
     let writer_task = tokio::spawn(writer_loop(writer, data_rx, abort_rx.clone()));
 
-    reader_loop(reader, conn_id, &state, data_tx, abort_rx).await;
+    reader_loop(reader, conn_id, &state, data_tx, abort_rx, manifest_rx).await;
 
     state.unregister_connection(conn_id);
     state.metrics().connections_active.dec();
@@ -138,12 +143,29 @@ fn parse_client_frame(text: &str) -> Result<ClientFrame, ProtocolError> {
     }
 }
 
+/// On a hot-reload, decide whether an existing subscription survives the
+/// new manifest snapshot. `None` means it's still valid; `Some(reason)`
+/// distinguishes a removed stream from an audience that no longer
+/// intersects the connection's principals.
+fn revoke_reason(
+    manifest: Option<&Manifest>,
+    principals: &[String],
+    stream: &str,
+) -> Option<RevokeReason> {
+    match manifest.and_then(|m| m.stream(stream)) {
+        None => Some(RevokeReason::UnknownStream),
+        Some(s) if !audience_admits(principals, &s.audience) => Some(RevokeReason::Unauthorized),
+        Some(_) => None,
+    }
+}
+
 async fn reader_loop(
     mut reader: SplitStream<WebSocket>,
     conn_id: ConnId,
     state: &AppState,
     tx: mpsc::Sender<Outbound>,
     mut abort_rx: watch::Receiver<bool>,
+    mut manifest_rx: watch::Receiver<Option<Arc<Manifest>>>,
 ) {
     let mut principals: Option<Vec<String>> = None;
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
@@ -152,6 +174,10 @@ async fn reader_loop(
 
     abort_rx.borrow_and_update();
     let mut abort_active = true;
+    // Mark the current manifest as seen so changed() only fires on a real
+    // SIGHUP swap, not the value already in place when this task starts.
+    manifest_rx.borrow_and_update();
+    let mut manifest_active = true;
     loop {
         let msg = tokio::select! {
             biased;
@@ -161,6 +187,42 @@ async fn reader_loop(
                     break;
                 }
                 abort_active = false;
+                continue;
+            }
+            res = manifest_rx.changed(), if manifest_active => {
+                if res.is_err() {
+                    manifest_active = false;
+                    continue;
+                }
+                let snapshot = manifest_rx.borrow_and_update().clone();
+                if let Some(p) = principals.as_ref() {
+                    let revoked: Vec<(String, String, RevokeReason)> = subs
+                        .iter()
+                        .filter_map(|(sub_id, (stream, _))| {
+                            revoke_reason(snapshot.as_deref(), p, stream)
+                                .map(|reason| (sub_id.clone(), stream.clone(), reason))
+                        })
+                        .collect();
+                    for (sub_id, stream, reason) in revoked {
+                        let err = match &reason {
+                            RevokeReason::UnknownStream => {
+                                ProtocolError::UnknownStream { id: sub_id.clone() }
+                            }
+                            RevokeReason::Unauthorized => {
+                                ProtocolError::UnauthorizedSubscribe { id: sub_id.clone() }
+                            }
+                        };
+                        let _ = tx.try_send(err.to_outbound());
+                        state.registry().unsubscribe(&stream, conn_id, &sub_id);
+                        state.metrics().subscriptions_active.dec();
+                        state
+                            .metrics()
+                            .subscriptions_revoked
+                            .get_or_create(&RevokeReasonLabel { reason })
+                            .inc();
+                        subs.remove(&sub_id);
+                    }
+                }
                 continue;
             }
             msg = reader.next() => match msg {
@@ -225,8 +287,7 @@ async fn reader_loop(
                 };
                 let Some(audience) = state
                     .manifest()
-                    .and_then(|m| m.stream(&stream))
-                    .map(|s| s.audience.clone())
+                    .and_then(|m| m.stream(&stream).map(|s| s.audience.clone()))
                 else {
                     let _ = tx.try_send(ProtocolError::UnknownStream { id }.to_outbound());
                     continue;

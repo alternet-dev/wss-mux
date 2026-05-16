@@ -4,8 +4,9 @@ pub mod ws;
 
 use self::metrics::Metrics;
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -16,7 +17,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::config::Config;
 use crate::connection::{ConnId, Outbound};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestError};
 use crate::registry::Registry;
 
 #[derive(Clone)]
@@ -26,7 +27,10 @@ pub struct AppState {
 
 struct Inner {
     config: Config,
-    manifest: OnceLock<Manifest>,
+    // Swappable so SIGHUP can hot-reload. `watch` gives both a cheap
+    // borrow() read on the dispatch/subscribe path and a change signal
+    // connections subscribe to for re-validation.
+    manifest_tx: watch::Sender<Option<Arc<Manifest>>>,
     registry: Registry,
     connections: DashMap<ConnId, ConnectionHandle>,
     next_conn_id: AtomicU64,
@@ -44,10 +48,11 @@ struct ConnectionHandle {
 
 impl AppState {
     pub fn new(config: Config) -> Self {
+        let (manifest_tx, _) = watch::channel(None);
         Self {
             inner: Arc::new(Inner {
                 config,
-                manifest: OnceLock::new(),
+                manifest_tx,
                 registry: Registry::new(),
                 connections: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
@@ -64,12 +69,36 @@ impl AppState {
         &self.inner.config
     }
 
-    pub fn manifest(&self) -> Option<&Manifest> {
-        self.inner.manifest.get()
+    /// Current manifest snapshot. The returned `Arc` is independent of any
+    /// concurrent hot-reload, so a holder (e.g. the dispatcher) can keep
+    /// using it across a swap.
+    pub fn manifest(&self) -> Option<Arc<Manifest>> {
+        self.inner.manifest_tx.borrow().clone()
     }
 
-    pub fn set_manifest(&self, manifest: Manifest) -> Result<(), Manifest> {
-        self.inner.manifest.set(manifest)
+    /// Install/replace the manifest. Called once at startup and again on
+    /// each successful SIGHUP reload. `send_replace` never errors even with
+    /// no receivers.
+    pub fn set_manifest(&self, manifest: Manifest) {
+        self.inner
+            .manifest_tx
+            .send_replace(Some(Arc::new(manifest)));
+    }
+
+    /// A receiver connections `select!` on to re-validate their
+    /// subscriptions when the manifest changes.
+    pub fn subscribe_manifest(&self) -> watch::Receiver<Option<Arc<Manifest>>> {
+        self.inner.manifest_tx.subscribe()
+    }
+
+    /// Load the manifest from `path` and swap it in. Returns the stream
+    /// count on success. On failure the previous manifest is retained
+    /// (the error is returned for the caller to log/meter).
+    pub fn reload_manifest(&self, path: &Path) -> Result<usize, ManifestError> {
+        let manifest = Manifest::load(path)?;
+        let count = manifest.streams.len();
+        self.set_manifest(manifest);
+        Ok(count)
     }
 
     pub fn registry(&self) -> &Registry {
@@ -132,5 +161,69 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, &'static str) {
         (StatusCode::OK, "ready")
     } else {
         (StatusCode::SERVICE_UNAVAILABLE, "not ready")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg() -> Config {
+        Config {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            push_auth_token: "t".into(),
+            handshake_signing_key: "k".into(),
+            manifest_path: "p".into(),
+            queue_depth: 8,
+        }
+    }
+
+    fn manifest(yaml: &str) -> Manifest {
+        Manifest::from_str(yaml, Path::new("test.yaml")).expect("valid manifest")
+    }
+
+    #[test]
+    fn manifest_starts_unset_then_set_and_is_swappable() {
+        let state = AppState::new(cfg());
+        assert!(state.manifest().is_none());
+
+        state.set_manifest(manifest(
+            "version: 1\nstreams:\n  - stream: a\n    audience: [role:x]\n",
+        ));
+        assert!(state.manifest().expect("set").stream("a").is_some());
+
+        // A second set swaps — the old OnceLock would have errored here.
+        state.set_manifest(manifest(
+            "version: 1\nstreams:\n  - stream: b\n    audience: [role:y]\n",
+        ));
+        let m = state.manifest().expect("swapped");
+        assert!(m.stream("a").is_none());
+        assert!(m.stream("b").is_some());
+    }
+
+    #[test]
+    fn reload_manifest_swaps_from_file_and_retains_old_on_error() {
+        let state = AppState::new(cfg());
+        let path = std::env::temp_dir().join(format!(
+            "wss-mux-reload-{}-{}.yaml",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("t")
+        ));
+        std::fs::write(
+            &path,
+            "version: 1\nstreams:\n  - stream: live\n    audience: [role:x]\n",
+        )
+        .expect("write fixture");
+
+        let count = state.reload_manifest(&path).expect("reload ok");
+        assert_eq!(count, 1);
+        assert!(state.manifest().expect("loaded").stream("live").is_some());
+
+        // Missing file: error surfaced, previous manifest retained.
+        let missing = std::env::temp_dir().join("wss-mux-reload-absent-zzzz.yaml");
+        assert!(state.reload_manifest(&missing).is_err());
+        assert!(state.manifest().expect("retained").stream("live").is_some());
+
+        let _ = std::fs::remove_file(&path);
     }
 }

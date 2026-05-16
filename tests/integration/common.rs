@@ -35,7 +35,7 @@ pub fn test_state() -> AppState {
 
 pub fn test_state_with_manifest() -> AppState {
     let state = test_state();
-    state.set_manifest(sample_manifest()).expect("set manifest");
+    state.set_manifest(sample_manifest());
     state
 }
 

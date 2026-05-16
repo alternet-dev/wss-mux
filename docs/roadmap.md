@@ -29,7 +29,9 @@ Out of scope:
 
 ## v0.2
 
-- Manifest hot-reload via `SIGHUP`.
+- ~~Manifest hot-reload via `SIGHUP`.~~ Shipped. Reload re-validates
+  active subscriptions; revoked ones get an `error` frame and the
+  connection stays open.
 - Configurable event envelope shape (custom JSON paths for `stream`
   and `key`, so producers don't have to use exactly those field
   names).
