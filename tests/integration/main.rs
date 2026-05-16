@@ -1,3 +1,4 @@
+mod cbor;
 mod common;
 mod envelope_shape;
 mod errors;

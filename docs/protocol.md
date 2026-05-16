@@ -163,19 +163,38 @@ Embedders should choose TTL with that tradeoff in mind:
 
 ## Wire format
 
-- Text WebSocket frames containing UTF-8 JSON.
 - One protocol frame per WebSocket message.
 - WebSocket compression (`permessage-deflate`) is supported and
   recommended for production.
-- Binary frames are reserved for future use and currently rejected
-  with `bad_frame`.
+- The encoding is fixed per connection by the negotiated subprotocol
+  (see below): JSON over text frames, or CBOR over binary frames.
+
+### Binary framing (CBOR)
+
+A connection that negotiates the `wss-mux.v1.cbor` subprotocol carries
+every frame as a CBOR (RFC 8949) binary message instead of UTF-8 JSON
+text. The frame *shapes* are identical — same `auth`/`subscribe`/
+`unsubscribe`/`event`/`error` fields — only the encoding differs. CBOR
+is self-describing, so producers and clients need no shared schema.
+
+The codec is per-connection and fixed at negotiation: on a CBOR
+connection a text message is a wire-type mismatch and is rejected with
+`bad_frame` (close `4400`); likewise a binary message on a JSON
+(`wss-mux.v1`) connection. `bad_frame` vs `unknown_frame_type` stays
+distinguishable on both codecs (a well-formed CBOR map with an
+unrecognized `type` is `unknown_frame_type`).
 
 ## Subprotocol negotiation
 
-Clients SHOULD send `Sec-WebSocket-Protocol: wss-mux.v1` on the
-upgrade request. The server selects the highest version it supports.
-Servers MUST reject upgrades that don't negotiate a compatible
-subprotocol.
+Clients send `Sec-WebSocket-Protocol` on the upgrade request with one
+or both of:
+
+- `wss-mux.v1` — JSON text framing.
+- `wss-mux.v1.cbor` — CBOR binary framing.
+
+If a client offers both, the server selects `wss-mux.v1.cbor`. The
+server MUST reject upgrades that don't negotiate a compatible
+subprotocol (HTTP `400`).
 
 ## Forward compatibility
 

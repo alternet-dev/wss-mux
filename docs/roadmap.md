@@ -39,7 +39,9 @@ Out of scope:
 - ~~Per-connection rate limits (token bucket).~~ Shipped. Inbound
   frame token bucket; `WSS_MUX_INBOUND_RATE`/`_BURST`; `rate_limited`
   keep-open error.
-- Binary frame opt-in (CBOR or MessagePack payload framing).
+- ~~Binary frame opt-in (CBOR or MessagePack payload framing).~~
+  Shipped as CBOR via the `wss-mux.v1.cbor` subprotocol; codec is
+  per-connection, frame shapes unchanged.
 
 ## v0.3
 
