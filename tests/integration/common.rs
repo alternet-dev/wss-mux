@@ -1,16 +1,23 @@
 use std::net::SocketAddr;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use futures_util::{SinkExt, StreamExt};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use wss_mux::auth::Claims;
 use wss_mux::config::Config;
+use wss_mux::envelope::{ClientFrame, ServerFrame};
 use wss_mux::manifest::Manifest;
 use wss_mux::server::{build_app, AppState};
 
 pub const PUSH_TOKEN: &str = "test-push-token";
 pub const SIGNING_KEY: &str = "test-signing-key";
+
+pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub fn test_config() -> Config {
     Config {
@@ -79,4 +86,104 @@ pub fn sign_token_with_offsets(
         &EncodingKey::from_secret(SIGNING_KEY.as_bytes()),
     )
     .unwrap()
+}
+
+// --- WebSocket client helpers --------------------------------------------
+
+pub async fn connect_ws(addr: SocketAddr) -> Ws {
+    let url = format!("ws://{addr}/v1/stream");
+    let mut req = url.into_client_request().expect("request");
+    req.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        "wss-mux.v1".parse().expect("header"),
+    );
+    let (stream, _) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("connect");
+    stream
+}
+
+pub async fn send_text(ws: &mut Ws, text: String) {
+    ws.send(WsMessage::Text(text)).await.expect("send");
+}
+
+pub async fn send_frame(ws: &mut Ws, frame: &ClientFrame) {
+    send_text(ws, serde_json::to_string(frame).expect("serialize")).await;
+}
+
+/// Reads the next non-ping/pong message from the socket within 2 seconds.
+pub async fn recv_message(ws: &mut Ws) -> WsMessage {
+    loop {
+        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
+            .await
+            .expect("recv timed out")
+            .expect("stream ended")
+            .expect("recv error");
+        match msg {
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            other => return other,
+        }
+    }
+}
+
+/// Expects the next message to be an event frame.
+pub async fn recv_event(ws: &mut Ws) -> ServerFrame {
+    match recv_message(ws).await {
+        WsMessage::Text(t) => serde_json::from_str(t.as_str()).expect("parse frame"),
+        other => panic!("expected text frame, got {other:?}"),
+    }
+}
+
+/// Expects the next message to be an error frame; returns (code, id).
+pub async fn recv_error_frame(ws: &mut Ws) -> (String, Option<String>) {
+    match recv_message(ws).await {
+        WsMessage::Text(t) => match serde_json::from_str(t.as_str()).expect("parse") {
+            ServerFrame::Error { code, id, .. } => (code, id),
+            other => panic!("expected error frame, got {other:?}"),
+        },
+        other => panic!("expected text frame, got {other:?}"),
+    }
+}
+
+/// Expects the next message to be a close frame; returns its code (1005 if
+/// the close was sent without a status).
+pub async fn recv_close_code(ws: &mut Ws) -> u16 {
+    match recv_message(ws).await {
+        WsMessage::Close(Some(frame)) => u16::from(frame.code),
+        WsMessage::Close(None) => 1005,
+        other => panic!("expected close, got {other:?}"),
+    }
+}
+
+// --- Polling helpers -----------------------------------------------------
+
+/// Polls `cond` every 10ms until it returns true or `timeout` elapses.
+/// Returns the final result.
+pub async fn poll_until<F: FnMut() -> bool>(timeout: Duration, mut cond: F) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    cond()
+}
+
+/// Polls `GET /metrics` every 10ms until the body contains `substring` or
+/// `timeout` elapses.
+pub async fn poll_metrics_for(addr: SocketAddr, substring: &str, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    let http = reqwest::Client::new();
+    while Instant::now() < deadline {
+        if let Ok(resp) = http.get(format!("http://{addr}/metrics")).send().await {
+            if let Ok(body) = resp.text().await {
+                if body.contains(substring) {
+                    return true;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    false
 }

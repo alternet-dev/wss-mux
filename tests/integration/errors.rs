@@ -1,69 +1,10 @@
-use std::net::SocketAddr;
-use std::time::Duration;
-
-use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use wss_mux::envelope::{ClientFrame, ServerFrame};
+use wss_mux::envelope::ClientFrame;
 
-use crate::common::{sign_token, sign_token_with_offsets, spawn_server, test_state_with_manifest};
-
-type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-async fn connect_ws(addr: SocketAddr) -> Ws {
-    let url = format!("ws://{addr}/v1/stream");
-    let mut req = url.into_client_request().expect("request");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        "wss-mux.v1".parse().expect("header"),
-    );
-    let (stream, _) = tokio_tungstenite::connect_async(req)
-        .await
-        .expect("connect");
-    stream
-}
-
-async fn send_text(ws: &mut Ws, text: String) {
-    ws.send(WsMessage::Text(text)).await.expect("send");
-}
-
-async fn send_frame(ws: &mut Ws, frame: &ClientFrame) {
-    send_text(ws, serde_json::to_string(frame).expect("serialize")).await;
-}
-
-async fn recv_message(ws: &mut Ws) -> WsMessage {
-    loop {
-        let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
-            .await
-            .expect("recv timed out")
-            .expect("stream ended")
-            .expect("recv error");
-        match msg {
-            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
-            other => return other,
-        }
-    }
-}
-
-async fn recv_error_frame(ws: &mut Ws) -> (String, Option<String>) {
-    match recv_message(ws).await {
-        WsMessage::Text(t) => match serde_json::from_str(t.as_str()).expect("parse") {
-            ServerFrame::Error { code, id, .. } => (code, id),
-            other => panic!("expected error frame, got {other:?}"),
-        },
-        other => panic!("expected text frame, got {other:?}"),
-    }
-}
-
-async fn recv_close_code(ws: &mut Ws) -> u16 {
-    match recv_message(ws).await {
-        WsMessage::Close(Some(frame)) => u16::from(frame.code),
-        WsMessage::Close(None) => 1005,
-        other => panic!("expected close, got {other:?}"),
-    }
-}
+use crate::common::{
+    connect_ws, recv_close_code, recv_error_frame, send_frame, send_text, sign_token,
+    sign_token_with_offsets, spawn_server, test_state_with_manifest,
+};
 
 #[tokio::test]
 async fn bad_frame_emits_error_and_closes_4400() {
@@ -98,6 +39,7 @@ async fn binary_frame_emits_bad_frame_and_closes_4400() {
     let addr = spawn_server(state).await;
     let mut ws = connect_ws(addr).await;
 
+    use futures_util::SinkExt;
     ws.send(WsMessage::Binary(vec![0, 1, 2]))
         .await
         .expect("send");
@@ -135,7 +77,6 @@ async fn expired_token_emits_expired_and_closes_4401() {
     let addr = spawn_server(state).await;
     let mut ws = connect_ws(addr).await;
 
-    // iat 2h ago, exp 1h ago.
     let token = sign_token_with_offsets(&["role:member"], -7200, -3600);
     send_frame(&mut ws, &ClientFrame::Auth { token }).await;
 
@@ -151,7 +92,6 @@ async fn invalid_signature_emits_unauthenticated_and_closes_4401() {
     let addr = spawn_server(state).await;
     let mut ws = connect_ws(addr).await;
 
-    // A syntactically valid but improperly signed JWT.
     let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJ4IiwiaWF0IjoxLCJleHAiOjk5OTk5OTk5OTksInN1YiI6IngiLCJwcmluY2lwYWxzIjpbXX0.aaaaaa";
     send_frame(
         &mut ws,
@@ -193,7 +133,7 @@ async fn subscribe_to_unknown_stream_emits_error_and_stays_open() {
     assert_eq!(code, "unknown_stream");
     assert_eq!(id.as_deref(), Some("s1"));
 
-    // Connection still works: a valid subscribe afterward succeeds (no error).
+    // Connection still works: a valid subscribe afterward doesn't emit an error.
     send_frame(
         &mut ws,
         &ClientFrame::Subscribe {
@@ -203,9 +143,7 @@ async fn subscribe_to_unknown_stream_emits_error_and_stays_open() {
         },
     )
     .await;
-    // No error should follow; assert by sending unsubscribe and reading no error.
     send_frame(&mut ws, &ClientFrame::Unsubscribe { id: "s2".into() }).await;
-    // Close gracefully — if the server had emitted anything, recv_message would surface it.
 }
 
 #[tokio::test]
@@ -214,7 +152,6 @@ async fn unauthorized_subscribe_emits_error_and_stays_open() {
     let addr = spawn_server(state).await;
     let mut ws = connect_ws(addr).await;
 
-    // Token with a principal that does not intersect chat_messages' audience ([role:member]).
     send_frame(
         &mut ws,
         &ClientFrame::Auth {
@@ -235,7 +172,6 @@ async fn unauthorized_subscribe_emits_error_and_stays_open() {
     let (code, id) = recv_error_frame(&mut ws).await;
     assert_eq!(code, "unauthorized_subscribe");
     assert_eq!(id.as_deref(), Some("s1"));
-    // Connection stays open — no close received.
 }
 
 #[tokio::test]

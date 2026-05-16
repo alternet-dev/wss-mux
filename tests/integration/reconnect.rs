@@ -1,57 +1,11 @@
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use futures_util::{SinkExt, StreamExt};
-use tokio::net::TcpStream;
-use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::Message as WsMessage;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use wss_mux::envelope::{ClientFrame, ServerFrame};
 
-use crate::common::{sign_token, spawn_server, test_state_with_manifest, PUSH_TOKEN};
-
-type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-async fn connect_ws(addr: SocketAddr) -> Ws {
-    let url = format!("ws://{addr}/v1/stream");
-    let mut req = url.into_client_request().expect("request");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        "wss-mux.v1".parse().expect("header"),
-    );
-    let (stream, _) = tokio_tungstenite::connect_async(req)
-        .await
-        .expect("connect");
-    stream
-}
-
-async fn send_frame(ws: &mut Ws, frame: &ClientFrame) {
-    let json = serde_json::to_string(frame).expect("serialize");
-    ws.send(WsMessage::Text(json)).await.expect("send");
-}
-
-async fn recv_event(ws: &mut Ws) -> ServerFrame {
-    let msg = tokio::time::timeout(Duration::from_secs(2), ws.next())
-        .await
-        .expect("recv timed out")
-        .expect("stream ended")
-        .expect("recv error");
-    match msg {
-        WsMessage::Text(t) => serde_json::from_str(t.as_str()).expect("parse frame"),
-        other => panic!("expected text frame, got {other:?}"),
-    }
-}
-
-async fn poll_until<F: FnMut() -> bool>(timeout: Duration, mut cond: F) -> bool {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if cond() {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    cond()
-}
+use crate::common::{
+    connect_ws, poll_until, recv_event, send_frame, sign_token, spawn_server,
+    test_state_with_manifest, Ws, PUSH_TOKEN,
+};
 
 async fn subscribe_chat_messages(ws: &mut Ws) {
     send_frame(
@@ -88,7 +42,6 @@ async fn dropping_ws_releases_subscriptions() {
             .await,
             "subscription did not register"
         );
-        // ws drops at end of block, closing the connection.
     }
 
     assert!(
@@ -125,7 +78,6 @@ async fn reconnect_resubscribes_and_receives_new_events() {
         "registry not cleaned up before reconnect"
     );
 
-    // Reconnect on a fresh socket.
     let mut ws = connect_ws(addr).await;
     subscribe_chat_messages(&mut ws).await;
     assert!(
