@@ -1,4 +1,5 @@
 mod common;
+mod envelope_shape;
 mod errors;
 mod healthz;
 mod hot_reload;

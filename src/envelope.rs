@@ -44,6 +44,71 @@ pub struct EventEnvelope {
     pub payload: Value,
 }
 
+/// Where to find each field inside a producer's push body. Dotted paths
+/// are object traversal only (no array indexing). An empty path resolves
+/// to the whole body.
+#[derive(Debug, Clone, Copy)]
+pub struct EnvelopePaths<'a> {
+    pub stream: &'a str,
+    pub key: &'a str,
+    pub payload: &'a str,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum EnvelopeError {
+    #[error("missing or non-string stream at path `{0}`")]
+    Stream(String),
+    #[error("key at path `{0}` is present but not a string")]
+    Key(String),
+    #[error("missing payload at path `{0}`")]
+    Payload(String),
+}
+
+/// Resolve a dotted `path` against `value`, traversing object fields. An
+/// empty path returns `value` itself.
+pub fn pluck<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.is_empty() {
+        return Some(value);
+    }
+    let mut cur = value;
+    for segment in path.split('.') {
+        cur = cur.get(segment)?;
+    }
+    Some(cur)
+}
+
+impl EventEnvelope {
+    /// Build an envelope from an arbitrary push body using the configured
+    /// paths. With the default paths (`stream`/`key`/`payload`) this is
+    /// equivalent to deserializing the body directly into `EventEnvelope`:
+    /// stream is a required non-empty string, key is an optional string
+    /// (absent or `null` → `None`), payload must be present (explicit
+    /// `null` is allowed).
+    pub fn from_value(body: &Value, paths: EnvelopePaths<'_>) -> Result<Self, EnvelopeError> {
+        let stream = pluck(body, paths.stream)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| EnvelopeError::Stream(paths.stream.to_string()))?
+            .to_string();
+
+        let key = match pluck(body, paths.key) {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => return Err(EnvelopeError::Key(paths.key.to_string())),
+        };
+
+        let payload = pluck(body, paths.payload)
+            .cloned()
+            .ok_or_else(|| EnvelopeError::Payload(paths.payload.to_string()))?;
+
+        Ok(EventEnvelope {
+            stream,
+            key,
+            payload,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +239,116 @@ mod tests {
         assert!(!s.contains("\"key\""));
         let back: EventEnvelope = serde_json::from_str(&s).unwrap();
         assert_eq!(back, envelope);
+    }
+
+    const DEFAULTS: EnvelopePaths<'static> = EnvelopePaths {
+        stream: "stream",
+        key: "key",
+        payload: "payload",
+    };
+
+    #[test]
+    fn pluck_traverses_nested_objects() {
+        let v = json!({"meta": {"topic": "chat", "n": 1}});
+        assert_eq!(pluck(&v, "meta.topic"), Some(&json!("chat")));
+        assert_eq!(pluck(&v, "meta.n"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn pluck_misses_return_none() {
+        let v = json!({"meta": {"topic": "chat"}});
+        assert_eq!(pluck(&v, "meta.missing"), None);
+        assert_eq!(pluck(&v, "nope.topic"), None);
+        // Mid-path is not an object.
+        assert_eq!(pluck(&v, "meta.topic.deeper"), None);
+    }
+
+    #[test]
+    fn pluck_empty_path_is_identity() {
+        let v = json!({"a": 1});
+        assert_eq!(pluck(&v, ""), Some(&v));
+    }
+
+    #[test]
+    fn from_value_defaults_match_direct_deserialization() {
+        let body = json!({"stream": "chat", "key": "room-1", "payload": {"x": 1}});
+        let env = EventEnvelope::from_value(&body, DEFAULTS).expect("envelope");
+        let direct: EventEnvelope = serde_json::from_value(body).unwrap();
+        assert_eq!(env, direct);
+    }
+
+    #[test]
+    fn from_value_absent_and_null_key_are_none() {
+        let absent = json!({"stream": "chat", "payload": {}});
+        assert_eq!(
+            EventEnvelope::from_value(&absent, DEFAULTS).unwrap().key,
+            None
+        );
+        let null = json!({"stream": "chat", "key": null, "payload": {}});
+        assert_eq!(
+            EventEnvelope::from_value(&null, DEFAULTS).unwrap().key,
+            None
+        );
+    }
+
+    #[test]
+    fn from_value_custom_paths() {
+        let paths = EnvelopePaths {
+            stream: "meta.topic",
+            key: "meta.room",
+            payload: "data",
+        };
+        let body = json!({
+            "meta": {"topic": "chat_messages", "room": "42"},
+            "data": {"text": "hi"}
+        });
+        let env = EventEnvelope::from_value(&body, paths).expect("envelope");
+        assert_eq!(env.stream, "chat_messages");
+        assert_eq!(env.key.as_deref(), Some("42"));
+        assert_eq!(env.payload, json!({"text": "hi"}));
+    }
+
+    #[test]
+    fn from_value_missing_stream_errors() {
+        let body = json!({"payload": {}});
+        assert_eq!(
+            EventEnvelope::from_value(&body, DEFAULTS),
+            Err(EnvelopeError::Stream("stream".into()))
+        );
+    }
+
+    #[test]
+    fn from_value_non_string_stream_errors() {
+        let body = json!({"stream": 7, "payload": {}});
+        assert!(matches!(
+            EventEnvelope::from_value(&body, DEFAULTS),
+            Err(EnvelopeError::Stream(_))
+        ));
+    }
+
+    #[test]
+    fn from_value_non_string_key_errors() {
+        let body = json!({"stream": "chat", "key": 7, "payload": {}});
+        assert!(matches!(
+            EventEnvelope::from_value(&body, DEFAULTS),
+            Err(EnvelopeError::Key(_))
+        ));
+    }
+
+    #[test]
+    fn from_value_missing_payload_errors() {
+        let body = json!({"stream": "chat"});
+        assert!(matches!(
+            EventEnvelope::from_value(&body, DEFAULTS),
+            Err(EnvelopeError::Payload(_))
+        ));
+        // Explicit null payload is allowed.
+        let with_null = json!({"stream": "chat", "payload": null});
+        assert_eq!(
+            EventEnvelope::from_value(&with_null, DEFAULTS)
+                .unwrap()
+                .payload,
+            Value::Null
+        );
     }
 }

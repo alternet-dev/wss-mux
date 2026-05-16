@@ -2,10 +2,11 @@ use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
+use crate::config::Config;
 use crate::dispatcher::dispatch;
-use crate::envelope::EventEnvelope;
+use crate::envelope::{EnvelopePaths, EventEnvelope};
 use crate::server::AppState;
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
@@ -19,19 +20,24 @@ pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-pub struct BatchEnvelope {
-    pub events: Vec<EventEnvelope>,
+fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
+    EnvelopePaths {
+        stream: &config.envelope_stream_path,
+        key: &config.envelope_key_path,
+        payload: &config.envelope_payload_path,
+    }
 }
 
 pub async fn push_event(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Result<Json<EventEnvelope>, axum::extract::rejection::JsonRejection>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     authenticate(&headers, &state.config().push_auth_token)?;
 
-    let Json(envelope) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
+    let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
+    let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
     let manifest = state
         .manifest()
@@ -44,30 +50,42 @@ pub async fn push_event(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Batch push. All-or-nothing per docs/roadmap.md: any envelope failing
-/// JSON deserialization fails the whole batch with 400; any envelope
-/// referencing a stream not in the manifest fails with 404. Otherwise all
-/// events are dispatched and the response is 204 with no per-event status.
+/// Batch push. The wrapper is always `{"events": [...]}`; each element is
+/// interpreted with the configured envelope paths. All-or-nothing per
+/// docs/roadmap.md: any element failing envelope extraction fails the
+/// whole batch with 400; any referencing a stream not in the manifest
+/// fails with 404. Otherwise all events are dispatched and the response is
+/// 204 with no per-event status.
 pub async fn push_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
-    body: Result<Json<BatchEnvelope>, axum::extract::rejection::JsonRejection>,
+    body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     authenticate(&headers, &state.config().push_auth_token)?;
 
-    let Json(batch) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid batch envelope"))?;
+    let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
+    let events = body
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or((StatusCode::BAD_REQUEST, "batch body needs an events array"))?;
 
     let manifest = state
         .manifest()
         .ok_or((StatusCode::SERVICE_UNAVAILABLE, "manifest not loaded"))?;
-    for event in &batch.events {
-        if manifest.stream(&event.stream).is_none() {
+    let paths = envelope_paths(state.config());
+
+    let mut parsed = Vec::with_capacity(events.len());
+    for raw in events {
+        let envelope = EventEnvelope::from_value(raw, paths)
+            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid event in batch"))?;
+        if manifest.stream(&envelope.stream).is_none() {
             return Err((StatusCode::NOT_FOUND, "unknown stream in batch"));
         }
+        parsed.push(envelope);
     }
 
-    for event in batch.events {
-        dispatch(&state, event);
+    for envelope in parsed {
+        dispatch(&state, envelope);
     }
     Ok(StatusCode::NO_CONTENT)
 }

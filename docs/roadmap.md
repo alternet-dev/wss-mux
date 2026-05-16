@@ -32,9 +32,10 @@ Out of scope:
 - ~~Manifest hot-reload via `SIGHUP`.~~ Shipped. Reload re-validates
   active subscriptions; revoked ones get an `error` frame and the
   connection stays open.
-- Configurable event envelope shape (custom JSON paths for `stream`
+- ~~Configurable event envelope shape (custom JSON paths for `stream`
   and `key`, so producers don't have to use exactly those field
-  names).
+  names).~~ Shipped. Dotted paths for stream/key/payload via
+  `WSS_MUX_ENVELOPE_*_PATH`; defaults reproduce the classic body.
 - Per-connection rate limits (token bucket).
 - Binary frame opt-in (CBOR or MessagePack payload framing).
 

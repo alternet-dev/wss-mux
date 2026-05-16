@@ -6,6 +6,9 @@ use thiserror::Error;
 
 pub const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 pub const DEFAULT_QUEUE_DEPTH: usize = 1024;
+pub const DEFAULT_ENVELOPE_STREAM_PATH: &str = "stream";
+pub const DEFAULT_ENVELOPE_KEY_PATH: &str = "key";
+pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -14,6 +17,14 @@ pub struct Config {
     pub handshake_signing_key: String,
     pub manifest_path: PathBuf,
     pub queue_depth: usize,
+    /// Dotted path into the push body where the stream name lives.
+    /// Default `stream`. Object traversal only (no array indexing); an
+    /// empty value means "the whole body".
+    pub envelope_stream_path: String,
+    /// Dotted path to the optional key. Default `key`.
+    pub envelope_key_path: String,
+    /// Dotted path to the payload. Default `payload`.
+    pub envelope_payload_path: String,
 }
 
 #[derive(Debug, Error)]
@@ -78,12 +89,22 @@ impl Config {
             None => DEFAULT_QUEUE_DEPTH,
         };
 
+        let envelope_stream_path = get("WSS_MUX_ENVELOPE_STREAM_PATH")
+            .unwrap_or_else(|| DEFAULT_ENVELOPE_STREAM_PATH.to_string());
+        let envelope_key_path = get("WSS_MUX_ENVELOPE_KEY_PATH")
+            .unwrap_or_else(|| DEFAULT_ENVELOPE_KEY_PATH.to_string());
+        let envelope_payload_path = get("WSS_MUX_ENVELOPE_PAYLOAD_PATH")
+            .unwrap_or_else(|| DEFAULT_ENVELOPE_PAYLOAD_PATH.to_string());
+
         Ok(Config {
             listen_addr,
             push_auth_token,
             handshake_signing_key,
             manifest_path,
             queue_depth,
+            envelope_stream_path,
+            envelope_key_path,
+            envelope_payload_path,
         })
     }
 }
@@ -116,6 +137,21 @@ mod tests {
         assert_eq!(cfg.push_auth_token, "push-secret");
         assert_eq!(cfg.handshake_signing_key, "handshake-secret");
         assert_eq!(cfg.manifest_path.to_str(), Some("./streams.yaml"));
+        assert_eq!(cfg.envelope_stream_path, "stream");
+        assert_eq!(cfg.envelope_key_path, "key");
+        assert_eq!(cfg.envelope_payload_path, "payload");
+    }
+
+    #[test]
+    fn envelope_paths_override_from_env() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_ENVELOPE_STREAM_PATH", "meta.topic"));
+        pairs.push(("WSS_MUX_ENVELOPE_KEY_PATH", "meta.room"));
+        pairs.push(("WSS_MUX_ENVELOPE_PAYLOAD_PATH", "data"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.envelope_stream_path, "meta.topic");
+        assert_eq!(cfg.envelope_key_path, "meta.room");
+        assert_eq!(cfg.envelope_payload_path, "data");
     }
 
     #[test]
