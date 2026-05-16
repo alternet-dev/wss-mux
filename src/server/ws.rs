@@ -22,28 +22,67 @@ use crate::server::metrics::{RevokeReason, RevokeReasonLabel};
 use crate::server::AppState;
 
 pub const SUBPROTOCOL: &str = "wss-mux.v1";
+pub const SUBPROTOCOL_CBOR: &str = "wss-mux.v1.cbor";
+
+/// Per-connection wire encoding, fixed at subprotocol negotiation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    /// `wss-mux.v1` — frames as UTF-8 JSON text messages.
+    Json,
+    /// `wss-mux.v1.cbor` — frames as CBOR binary messages.
+    Cbor,
+}
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
-    if !client_offers_subprotocol(&headers) {
-        return (StatusCode::BAD_REQUEST, "subprotocol required: wss-mux.v1").into_response();
-    }
-    ws.protocols([SUBPROTOCOL])
-        .on_upgrade(move |socket| handle_socket(socket, state))
+    let Some(codec) = negotiate_codec(&headers) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "subprotocol required: wss-mux.v1 or wss-mux.v1.cbor",
+        )
+            .into_response();
+    };
+    // Server preference order: CBOR first, so a client offering both
+    // gets CBOR — matching negotiate_codec.
+    ws.protocols([SUBPROTOCOL_CBOR, SUBPROTOCOL])
+        .on_upgrade(move |socket| handle_socket(socket, state, codec))
 }
 
-fn client_offers_subprotocol(headers: &HeaderMap) -> bool {
-    headers
+/// Pick the codec from the client's `Sec-WebSocket-Protocol` offer. CBOR
+/// wins if offered anywhere in the list; otherwise plain `wss-mux.v1`
+/// selects JSON. `None` means no compatible subprotocol was offered.
+fn negotiate_codec(headers: &HeaderMap) -> Option<Codec> {
+    let offered = headers
         .get(header::SEC_WEBSOCKET_PROTOCOL)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').any(|p| p.trim() == SUBPROTOCOL))
-        .unwrap_or(false)
+        .and_then(|v| v.to_str().ok())?;
+    let mut has_json = false;
+    for proto in offered.split(',').map(str::trim) {
+        if proto == SUBPROTOCOL_CBOR {
+            return Some(Codec::Cbor);
+        }
+        if proto == SUBPROTOCOL {
+            has_json = true;
+        }
+    }
+    has_json.then_some(Codec::Json)
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+/// Encode a server frame for the connection's codec.
+fn encode_frame(codec: Codec, frame: &ServerFrame) -> Option<Message> {
+    match codec {
+        Codec::Json => serde_json::to_string(frame).ok().map(Message::Text),
+        Codec::Cbor => {
+            let mut buf = Vec::new();
+            ciborium::into_writer(frame, &mut buf).ok()?;
+            Some(Message::Binary(buf))
+        }
+    }
+}
+
+async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
     let conn_id = state.next_conn_id();
     let (data_tx, data_rx) = mpsc::channel::<Outbound>(state.config().queue_depth);
     let (abort_tx, abort_rx) = watch::channel(false);
@@ -55,9 +94,18 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let manifest_rx = state.subscribe_manifest();
 
     let (writer, reader) = socket.split();
-    let writer_task = tokio::spawn(writer_loop(writer, data_rx, abort_rx.clone()));
+    let writer_task = tokio::spawn(writer_loop(writer, data_rx, abort_rx.clone(), codec));
 
-    reader_loop(reader, conn_id, &state, data_tx, abort_rx, manifest_rx).await;
+    reader_loop(
+        reader,
+        conn_id,
+        &state,
+        data_tx,
+        abort_rx,
+        manifest_rx,
+        codec,
+    )
+    .await;
 
     state.unregister_connection(conn_id);
     state.metrics().connections_active.dec();
@@ -68,6 +116,7 @@ async fn writer_loop(
     mut writer: SplitSink<WebSocket, Message>,
     mut rx: mpsc::Receiver<Outbound>,
     mut abort_rx: watch::Receiver<bool>,
+    codec: Codec,
 ) {
     // Mark the initial `false` as seen so changed() only fires on a real
     // transition. Without this, changed() returns Ready immediately the
@@ -82,7 +131,7 @@ async fn writer_loop(
             biased;
             res = abort_rx.changed(), if abort_active => {
                 if res.is_ok() && *abort_rx.borrow() {
-                    emit_overflow_close(&mut writer).await;
+                    emit_overflow_close(&mut writer, codec).await;
                     return;
                 }
                 abort_active = false;
@@ -90,17 +139,17 @@ async fn writer_loop(
             msg = rx.recv() => {
                 match msg {
                     Some(Outbound::Frame(frame)) => {
-                        let Ok(json) = serde_json::to_string(&frame) else {
+                        let Some(msg) = encode_frame(codec, &frame) else {
                             continue;
                         };
-                        if writer.send(Message::Text(json)).await.is_err() {
+                        if writer.send(msg).await.is_err() {
                             return;
                         }
                     }
                     Some(Outbound::Close { code, reason, frame }) => {
                         if let Some(frame) = frame {
-                            if let Ok(json) = serde_json::to_string(&frame) {
-                                let _ = writer.send(Message::Text(json)).await;
+                            if let Some(msg) = encode_frame(codec, &frame) {
+                                let _ = writer.send(msg).await;
                             }
                         }
                         let close = CloseFrame { code, reason: Cow::Owned(reason) };
@@ -115,14 +164,14 @@ async fn writer_loop(
     let _ = writer.send(Message::Close(None)).await;
 }
 
-async fn emit_overflow_close(writer: &mut SplitSink<WebSocket, Message>) {
+async fn emit_overflow_close(writer: &mut SplitSink<WebSocket, Message>, codec: Codec) {
     let err = ServerFrame::Error {
         code: "overflow".into(),
         message: "per-connection send queue overflowed".into(),
         id: None,
     };
-    if let Ok(json) = serde_json::to_string(&err) {
-        let _ = writer.send(Message::Text(json)).await;
+    if let Some(msg) = encode_frame(codec, &err) {
+        let _ = writer.send(msg).await;
     }
     let close = CloseFrame {
         code: 4429,
@@ -131,7 +180,9 @@ async fn emit_overflow_close(writer: &mut SplitSink<WebSocket, Message>) {
     let _ = writer.send(Message::Close(Some(close))).await;
 }
 
-fn parse_client_frame(text: &str) -> Result<ClientFrame, ProtocolError> {
+/// Two-stage JSON parse: any read failure is `bad_frame`; a parsed body
+/// with an unrecognized `type` is `unknown_frame_type`.
+fn parse_client_frame_json(text: &str) -> Result<ClientFrame, ProtocolError> {
     let value: Value = serde_json::from_str(text).map_err(|_| ProtocolError::BadFrame)?;
     let type_str = value
         .get("type")
@@ -140,6 +191,28 @@ fn parse_client_frame(text: &str) -> Result<ClientFrame, ProtocolError> {
     match type_str {
         "auth" | "subscribe" | "unsubscribe" => {
             serde_json::from_value(value).map_err(|_| ProtocolError::BadFrame)
+        }
+        _ => Err(ProtocolError::UnknownFrameType),
+    }
+}
+
+/// CBOR analogue of `parse_client_frame_json` — same two-stage logic so
+/// `bad_frame` and `unknown_frame_type` stay distinguishable on binary
+/// connections.
+fn parse_client_frame_cbor(bytes: &[u8]) -> Result<ClientFrame, ProtocolError> {
+    let value: ciborium::value::Value =
+        ciborium::from_reader(bytes).map_err(|_| ProtocolError::BadFrame)?;
+    let type_str = value
+        .as_map()
+        .and_then(|entries| {
+            entries
+                .iter()
+                .find_map(|(k, v)| (k.as_text() == Some("type")).then(|| v.as_text()).flatten())
+        })
+        .ok_or(ProtocolError::BadFrame)?;
+    match type_str {
+        "auth" | "subscribe" | "unsubscribe" => {
+            value.deserialized().map_err(|_| ProtocolError::BadFrame)
         }
         _ => Err(ProtocolError::UnknownFrameType),
     }
@@ -177,6 +250,7 @@ async fn reader_loop(
     tx: mpsc::Sender<Outbound>,
     mut abort_rx: watch::Receiver<bool>,
     mut manifest_rx: watch::Receiver<Option<Arc<Manifest>>>,
+    codec: Codec,
 ) {
     let mut principals: Option<Vec<String>> = None;
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
@@ -247,18 +321,18 @@ async fn reader_loop(
             }
         };
 
-        let text = match msg {
-            Ok(Message::Text(t)) => t,
-            Ok(Message::Binary(_)) => {
-                let _ = tx.try_send(ProtocolError::BadFrame.to_outbound());
-                explicit_close = true;
-                break;
-            }
+        // Decode per the negotiated codec. A wire-type mismatch (text on
+        // a CBOR connection or binary on a JSON one) is `bad_frame`, the
+        // same close-4400 path as a malformed body.
+        let parsed = match msg {
+            Ok(Message::Text(t)) if codec == Codec::Json => parse_client_frame_json(t.as_str()),
+            Ok(Message::Binary(b)) if codec == Codec::Cbor => parse_client_frame_cbor(&b),
+            Ok(Message::Text(_)) | Ok(Message::Binary(_)) => Err(ProtocolError::BadFrame),
             Ok(Message::Close(_)) | Err(_) => break,
             Ok(_) => continue,
         };
 
-        let frame = match parse_client_frame(text.as_str()) {
+        let frame = match parsed {
             Ok(f) => f,
             Err(err) => {
                 let _ = tx.try_send(err.to_outbound());

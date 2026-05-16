@@ -110,8 +110,35 @@ pub async fn connect_ws(addr: SocketAddr) -> Ws {
     stream
 }
 
+pub async fn connect_ws_cbor(addr: SocketAddr) -> Ws {
+    let url = format!("ws://{addr}/v1/stream");
+    let mut req = url.into_client_request().expect("request");
+    req.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        "wss-mux.v1.cbor".parse().expect("header"),
+    );
+    let (stream, _) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("connect");
+    stream
+}
+
 pub async fn send_text(ws: &mut Ws, text: String) {
     ws.send(WsMessage::Text(text)).await.expect("send");
+}
+
+pub async fn send_frame_cbor(ws: &mut Ws, frame: &ClientFrame) {
+    let mut buf = Vec::new();
+    ciborium::into_writer(frame, &mut buf).expect("cbor encode");
+    ws.send(WsMessage::Binary(buf)).await.expect("send");
+}
+
+/// Next non-ping/pong message decoded from CBOR into a `ServerFrame`.
+pub async fn recv_frame_cbor(ws: &mut Ws) -> ServerFrame {
+    match recv_message(ws).await {
+        WsMessage::Binary(b) => ciborium::from_reader(&b[..]).expect("cbor decode"),
+        other => panic!("expected binary frame, got {other:?}"),
+    }
 }
 
 pub async fn send_frame(ws: &mut Ws, frame: &ClientFrame) {
