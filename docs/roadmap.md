@@ -69,8 +69,11 @@ Out of scope:
 
 ## Open questions
 
-- Should batch push responses include per-event status, or stay
-  all-or-nothing 204?
+- ~~Should batch push responses include per-event status, or stay
+  all-or-nothing 204?~~ Resolved in v0.1 as all-or-nothing. Invalid
+  schema returns 400, an unknown stream in any event returns 404, and
+  on success a single 204 with no per-event detail. Per-event status
+  may be reconsidered if observability needs grow.
 - Should the manifest support stream wildcards (`chat_*`) for
   audience grants?
 - Should there be a per-stream max-payload-size to prevent pathological

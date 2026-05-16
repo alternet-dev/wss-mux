@@ -1,10 +1,16 @@
 use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::Json;
+use serde::{Deserialize, Serialize};
 
 use crate::dispatcher::dispatch;
 use crate::envelope::EventEnvelope;
 use crate::server::AppState;
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct BatchEnvelope {
+    pub events: Vec<EventEnvelope>,
+}
 
 pub async fn push_event(
     State(state): State<AppState>,
@@ -15,16 +21,41 @@ pub async fn push_event(
 
     let Json(envelope) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    if state
-        .manifest()
-        .and_then(|m| m.stream(&envelope.stream))
-        .is_none()
-    {
+    if !stream_in_manifest(&state, &envelope.stream) {
         return Err((StatusCode::NOT_FOUND, "unknown stream"));
     }
 
     dispatch(&state, envelope);
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Batch push. All-or-nothing per docs/roadmap.md: any envelope failing
+/// JSON deserialization fails the whole batch with 400; any envelope
+/// referencing a stream not in the manifest fails with 404. Otherwise all
+/// events are dispatched and the response is 204 with no per-event status.
+pub async fn push_batch(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Result<Json<BatchEnvelope>, axum::extract::rejection::JsonRejection>,
+) -> Result<StatusCode, (StatusCode, &'static str)> {
+    authenticate(&headers, &state.config().push_auth_token)?;
+
+    let Json(batch) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid batch envelope"))?;
+
+    for event in &batch.events {
+        if !stream_in_manifest(&state, &event.stream) {
+            return Err((StatusCode::NOT_FOUND, "unknown stream in batch"));
+        }
+    }
+
+    for event in batch.events {
+        dispatch(&state, event);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn stream_in_manifest(state: &AppState, name: &str) -> bool {
+    state.manifest().and_then(|m| m.stream(name)).is_some()
 }
 
 fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, &'static str)> {
