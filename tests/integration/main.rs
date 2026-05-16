@@ -6,5 +6,6 @@ mod hot_reload;
 mod metrics;
 mod overflow;
 mod push_to_fanout;
+mod rate_limit;
 mod readyz;
 mod reconnect;

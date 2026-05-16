@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -16,6 +17,7 @@ use crate::connection::{ConnId, Outbound};
 use crate::envelope::{ClientFrame, ServerFrame};
 use crate::error::ProtocolError;
 use crate::manifest::Manifest;
+use crate::ratelimit::TokenBucket;
 use crate::server::metrics::{RevokeReason, RevokeReasonLabel};
 use crate::server::AppState;
 
@@ -143,6 +145,15 @@ fn parse_client_frame(text: &str) -> Result<ClientFrame, ProtocolError> {
     }
 }
 
+/// The correlation id to echo in an `error` frame for a given client
+/// frame — `subscribe`/`unsubscribe` carry one, `auth` does not.
+fn client_frame_id(frame: &ClientFrame) -> Option<String> {
+    match frame {
+        ClientFrame::Auth { .. } => None,
+        ClientFrame::Subscribe { id, .. } | ClientFrame::Unsubscribe { id } => Some(id.clone()),
+    }
+}
+
 /// On a hot-reload, decide whether an existing subscription survives the
 /// new manifest snapshot. `None` means it's still valid; `Some(reason)`
 /// distinguishes a removed stream from an audience that no longer
@@ -171,6 +182,11 @@ async fn reader_loop(
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
     let mut explicit_close = false;
     let mut aborted = false;
+
+    // Per-connection inbound limiter. `rate == 0` disables it entirely.
+    let cfg = state.config();
+    let mut rate_limiter = (cfg.inbound_rate_per_sec > 0)
+        .then(|| TokenBucket::new(cfg.inbound_burst, cfg.inbound_rate_per_sec, Instant::now()));
 
     abort_rx.borrow_and_update();
     let mut abort_active = true;
@@ -250,6 +266,22 @@ async fn reader_loop(
                 break;
             }
         };
+
+        // Rate-limit gate: a throttled frame is dropped (not processed),
+        // the client gets a keep-open `rate_limited` error, and the
+        // connection survives.
+        if let Some(bucket) = rate_limiter.as_mut() {
+            if !bucket.try_take(Instant::now()) {
+                let _ = tx.try_send(
+                    ProtocolError::RateLimited {
+                        id: client_frame_id(&frame),
+                    }
+                    .to_outbound(),
+                );
+                state.metrics().frames_rate_limited.inc();
+                continue;
+            }
+        }
 
         match frame {
             ClientFrame::Auth { token } => {

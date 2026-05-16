@@ -215,6 +215,27 @@ scale, consider:
   `wss-mux` instances subscribe).
 - A producer-side fanout daemon that absorbs `M-fold` amplification.
 
+## Connection rate limiting
+
+Each connection has an inbound token bucket gating client-sent frames
+(`auth`/`subscribe`/`unsubscribe`) — protection against subscribe
+storms and malformed-frame floods.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_INBOUND_RATE` | `50` | sustained frames/sec/connection; `0` disables the limiter |
+| `WSS_MUX_INBOUND_BURST` | `100` | bucket capacity — largest instantaneous burst before the sustained rate applies |
+
+A throttled frame is **dropped, not processed**, and the client gets a
+keep-open `rate_limited` error frame (echoing the frame's `id` when it
+has one). The connection stays usable; once the bucket refills, frames
+flow again. Rejections increment `wss_mux_frames_rate_limited_total`.
+
+The bucket starts full, so a client can send up to `burst` frames
+immediately (a normal `auth` + a handful of `subscribe`s is well within
+the defaults). Tune `RATE` to your steady subscribe/unsubscribe churn
+and `BURST` to the largest legitimate reconnect-resubscribe spike.
+
 ## Tradeoffs you should know
 
 - **Restarts kill connections.** `wss-mux` is stateless about

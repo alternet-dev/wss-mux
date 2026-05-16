@@ -86,6 +86,7 @@ pub struct Metrics {
     pub send_queue_depth: Histogram,
     pub manifest_reloads: Family<ReloadResultLabel, Counter>,
     pub subscriptions_revoked: Family<RevokeReasonLabel, Counter>,
+    pub frames_rate_limited: Counter,
 }
 
 impl Default for Metrics {
@@ -100,6 +101,7 @@ impl Default for Metrics {
         let send_queue_depth = Histogram::new([1.0, 4.0, 16.0, 64.0, 256.0, 1024.0].into_iter());
         let manifest_reloads = Family::<ReloadResultLabel, Counter>::default();
         let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
+        let frames_rate_limited = Counter::default();
 
         registry.register(
             "wss_mux_connections",
@@ -141,6 +143,11 @@ impl Default for Metrics {
             "Subscriptions dropped by a hot-reload re-validation, by reason",
             subscriptions_revoked.clone(),
         );
+        registry.register(
+            "wss_mux_frames_rate_limited",
+            "Inbound client frames rejected by the per-connection rate limit",
+            frames_rate_limited.clone(),
+        );
 
         Self {
             registry: Mutex::new(registry),
@@ -152,6 +159,7 @@ impl Default for Metrics {
             send_queue_depth,
             manifest_reloads,
             subscriptions_revoked,
+            frames_rate_limited,
         }
     }
 }
