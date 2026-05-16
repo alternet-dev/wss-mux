@@ -20,7 +20,7 @@ ephemeral, no broker, no database, no required dependencies.
 5. [docs/embedding.md](docs/embedding.md) — integration patterns
 6. [docs/roadmap.md](docs/roadmap.md) — versioned plan
 7. Source: `src/main.rs` → `src/server/` → `src/registry.rs` +
-   `src/subscriptions.rs`
+   `src/dispatcher.rs`
 
 ## Key invariants
 
@@ -65,8 +65,9 @@ no external services.
 |---|---|
 | Wire-format change | `src/envelope.rs` + update `docs/protocol.md` |
 | New server route | `src/server/http.rs` or `src/server/ws.rs` |
-| Subscription routing | `src/subscriptions.rs` |
+| Subscription routing | `src/registry.rs` |
 | Connection state | `src/connection.rs` |
+| Rate limiting | `src/ratelimit.rs` |
 | Config knob | `src/config.rs` + README env table |
 | Metric | `src/server/metrics.rs` + `docs/architecture.md` |
 

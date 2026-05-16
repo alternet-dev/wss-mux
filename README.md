@@ -120,6 +120,37 @@ ws.send(JSON.stringify({
 }));
 ```
 
+## Configuration
+
+All configuration is environment variables, read once at startup.
+
+| Var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_AUTH_TOKEN` | — (required) | shared bearer secret for `POST /v1/events*` |
+| `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — (required) | HS256 key the client-token issuer signs with |
+| `WSS_MUX_STREAMS_MANIFEST_PATH` | — (required) | path to the YAML stream manifest |
+| `WSS_MUX_LISTEN_ADDR` | `0.0.0.0:8080` | bind address for HTTP + WebSocket |
+| `WSS_MUX_QUEUE_DEPTH` | `1024` | per-connection send-queue depth before overflow-close |
+| `WSS_MUX_ENVELOPE_STREAM_PATH` | `stream` | dotted path to the stream name in the push body |
+| `WSS_MUX_ENVELOPE_KEY_PATH` | `key` | dotted path to the optional key |
+| `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | dotted path to the payload |
+| `WSS_MUX_INBOUND_RATE` | `50` | inbound client-frame rate (frames/sec/conn); `0` disables |
+| `WSS_MUX_INBOUND_BURST` | `100` | inbound token-bucket capacity (burst) |
+
+Operational notes:
+
+- **`SIGHUP`** reloads and re-validates the manifest without dropping
+  connections; subscriptions invalidated by the new manifest get an
+  `error` frame and are dropped, the connection stays open. A failed
+  reload keeps the previous manifest serving.
+- **Binary framing.** Clients may negotiate the `wss-mux.v1.cbor`
+  subprotocol for CBOR instead of JSON; frame shapes are identical.
+- **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
+  `/healthz` and `/readyz` are the liveness/readiness probes.
+
+The envelope-path and rate-limit knobs are detailed in
+[docs/embedding.md](docs/embedding.md).
+
 ## Reading order
 
 1. [docs/concepts.md](docs/concepts.md) — first principles + vocabulary
