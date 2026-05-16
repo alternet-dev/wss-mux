@@ -27,7 +27,7 @@ Out of scope:
 - Adaptive queue depth.
 - Subscription persistence.
 
-## v0.2
+## v0.2 — shipped
 
 - ~~Manifest hot-reload via `SIGHUP`.~~ Shipped. Reload re-validates
   active subscriptions; revoked ones get an `error` frame and the
