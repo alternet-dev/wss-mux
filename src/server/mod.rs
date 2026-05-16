@@ -108,6 +108,7 @@ pub fn build_app(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/v1/events", post(http::push_event))
+        .route("/v1/events/batch", post(http::push_batch))
         .route("/v1/stream", get(ws::ws_handler))
         .with_state(state)
 }
