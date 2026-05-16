@@ -175,6 +175,9 @@ mod tests {
             handshake_signing_key: "k".into(),
             manifest_path: "p".into(),
             queue_depth: 8,
+            envelope_stream_path: "stream".into(),
+            envelope_key_path: "key".into(),
+            envelope_payload_path: "payload".into(),
         }
     }
 

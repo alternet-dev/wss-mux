@@ -46,6 +46,38 @@ Responses:
 - `401 Unauthorized` on bad auth.
 - `400 Bad Request` on schema failure.
 
+### Custom envelope shape
+
+If your producer already emits events with its own field names, you
+don't have to reshape them. Point `wss-mux` at the fields with dotted
+paths:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_ENVELOPE_STREAM_PATH` | `stream` | path to the stream name (required, non-empty string) |
+| `WSS_MUX_ENVELOPE_KEY_PATH` | `key` | path to the optional key (string, or absent/`null`) |
+| `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | path to the payload (any JSON; explicit `null` allowed, absent is an error) |
+
+Paths traverse object fields only (`meta.topic` → `body["meta"]["topic"]`);
+there is no array indexing. An empty path resolves to the whole body.
+The batch wrapper is always `{"events": [...]}` — only the per-event
+shape is configurable, and each element is interpreted with the same
+paths.
+
+With, say, `WSS_MUX_ENVELOPE_STREAM_PATH=meta.topic`,
+`WSS_MUX_ENVELOPE_KEY_PATH=meta.partition_key`,
+`WSS_MUX_ENVELOPE_PAYLOAD_PATH=data`, this body works unchanged:
+
+```json
+{
+  "meta": { "topic": "chat_messages", "partition_key": "room-42" },
+  "data": { "from": "alice", "text": "hello" }
+}
+```
+
+The defaults reproduce the classic `{stream,key,payload}` body exactly,
+so existing producers need no change.
+
 **Pushes are fire-and-forget from the producer's perspective.**
 `wss-mux` dispatches immediately; if delivery to a client fails
 (overflow, disconnected), the event is silently dropped. This matches

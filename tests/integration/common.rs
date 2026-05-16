@@ -26,6 +26,9 @@ pub fn test_config() -> Config {
         handshake_signing_key: SIGNING_KEY.into(),
         manifest_path: "test.yaml".into(),
         queue_depth: 1024,
+        envelope_stream_path: "stream".into(),
+        envelope_key_path: "key".into(),
+        envelope_payload_path: "payload".into(),
     }
 }
 
