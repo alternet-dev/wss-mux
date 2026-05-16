@@ -33,7 +33,10 @@ pub async fn push_event(
 
     let Json(envelope) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    if !stream_in_manifest(&state, &envelope.stream) {
+    let manifest = state
+        .manifest()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "manifest not loaded"))?;
+    if manifest.stream(&envelope.stream).is_none() {
         return Err((StatusCode::NOT_FOUND, "unknown stream"));
     }
 
@@ -54,8 +57,11 @@ pub async fn push_batch(
 
     let Json(batch) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid batch envelope"))?;
 
+    let manifest = state
+        .manifest()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "manifest not loaded"))?;
     for event in &batch.events {
-        if !stream_in_manifest(&state, &event.stream) {
+        if manifest.stream(&event.stream).is_none() {
             return Err((StatusCode::NOT_FOUND, "unknown stream in batch"));
         }
     }
@@ -64,10 +70,6 @@ pub async fn push_batch(
         dispatch(&state, event);
     }
     Ok(StatusCode::NO_CONTENT)
-}
-
-fn stream_in_manifest(state: &AppState, name: &str) -> bool {
-    state.manifest().and_then(|m| m.stream(name)).is_some()
 }
 
 fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, &'static str)> {

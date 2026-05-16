@@ -5,7 +5,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use wss_mux::envelope::{ClientFrame, ServerFrame};
 
 use crate::common::{
-    connect_ws, poll_until, recv_event, send_frame, sign_token, spawn_server,
+    connect_ws, poll_until, recv_event, send_frame, sign_token, spawn_server, test_state,
     test_state_with_manifest, PUSH_TOKEN,
 };
 
@@ -292,6 +292,44 @@ async fn batch_push_with_empty_events_array_is_204() {
         .await
         .expect("push");
     assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn push_event_without_manifest_returns_503() {
+    // No set_manifest call — server is up but not ready.
+    let state = test_state();
+    let addr = spawn_server(state).await;
+
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("http://{addr}/v1/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "stream": "chat_messages",
+            "payload": {}
+        }))
+        .send()
+        .await
+        .expect("push");
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn batch_push_without_manifest_returns_503() {
+    let state = test_state();
+    let addr = spawn_server(state).await;
+
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("http://{addr}/v1/events/batch"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "events": [{"stream": "chat_messages", "payload": {}}]
+        }))
+        .send()
+        .await
+        .expect("push");
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]
