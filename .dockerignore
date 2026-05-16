@@ -1,0 +1,17 @@
+# Build artifacts the host produced — don't ship to the daemon.
+target/
+
+# VCS / CI / docs not needed inside the image.
+.git/
+.github/
+docs/
+*.md
+
+# Dockerfile + dockerignore themselves don't need to be COPYed.
+Dockerfile
+.dockerignore
+
+# Editor noise.
+*.swp
+*.swo
+.DS_Store
