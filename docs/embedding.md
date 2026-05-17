@@ -45,6 +45,9 @@ Responses:
 - `204 No Content` on success.
 - `401 Unauthorized` on bad auth.
 - `400 Bad Request` on schema failure.
+- `413 Payload Too Large` if any event exceeds its stream's
+  `max_payload_bytes` cap. In a batch this rejects the whole batch
+  (all-or-nothing); nothing is dispatched.
 
 ### Custom envelope shape
 
@@ -182,6 +185,32 @@ Subscribe-time behavior:
 - Stream not in the manifest → `unknown_stream` error.
 - No audience entry admits the principals → `unauthorized_subscribe`
   error.
+
+### Per-stream payload cap
+
+A stream may declare an optional `max_payload_bytes`. A push whose
+payload exceeds it is rejected with `413` before any dispatch or
+relay:
+
+```yaml
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:member]
+    max_payload_bytes: 16384      # 16 KiB, guards fanout amplification
+```
+
+- The size is the length of the **JSON serialization of the payload**,
+  so the cap is stable regardless of the producer/relay wire codec
+  (a CBOR-relayed event is measured the same as a JSON push).
+- Absent ⇒ no cap. `0` is rejected at manifest load (it would
+  black-hole the stream).
+- Enforced on `/v1/events`, `/v1/events/batch`, and the internal
+  relay path alike — defense-in-depth, so a rolling deploy with mixed
+  manifests can't let an oversized event through a not-yet-updated
+  instance.
+- Batch semantics are all-or-nothing: one oversized event rejects the
+  whole batch with `413`; nothing is dispatched.
 
 ## Deployment patterns
 

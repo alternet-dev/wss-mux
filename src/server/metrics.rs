@@ -77,6 +77,25 @@ impl EncodeLabelValue for RevokeReason {
 }
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug, EncodeLabelSet)]
+pub struct RejectReasonLabel {
+    pub reason: RejectReason,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub enum RejectReason {
+    /// Event payload exceeded the stream's `max_payload_bytes` cap.
+    PayloadTooLarge,
+}
+
+impl EncodeLabelValue for RejectReason {
+    fn encode(&self, encoder: &mut LabelValueEncoder<'_>) -> Result<(), std::fmt::Error> {
+        encoder.write_str(match self {
+            Self::PayloadTooLarge => "payload_too_large",
+        })
+    }
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug, EncodeLabelSet)]
 pub struct RelayFailureLabel {
     pub reason: RelayFailure,
 }
@@ -118,6 +137,7 @@ pub struct Metrics {
     pub relay_sent: Counter,
     pub relay_failed: Family<RelayFailureLabel, Counter>,
     pub peers_known: Gauge,
+    pub events_rejected: Family<RejectReasonLabel, Counter>,
 }
 
 impl Default for Metrics {
@@ -136,6 +156,7 @@ impl Default for Metrics {
         let relay_sent = Counter::default();
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
         let peers_known = Gauge::default();
+        let events_rejected = Family::<RejectReasonLabel, Counter>::default();
 
         registry.register(
             "wss_mux_connections",
@@ -197,6 +218,11 @@ impl Default for Metrics {
             "Peers currently in the discovered relay set",
             peers_known.clone(),
         );
+        registry.register(
+            "wss_mux_events_rejected",
+            "Events rejected at ingest before dispatch, labeled by reason",
+            events_rejected.clone(),
+        );
 
         Self {
             registry: Mutex::new(registry),
@@ -212,6 +238,7 @@ impl Default for Metrics {
             relay_sent,
             relay_failed,
             peers_known,
+            events_rejected,
         }
     }
 }
