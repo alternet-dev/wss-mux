@@ -4,6 +4,7 @@ mod envelope_shape;
 mod errors;
 mod healthz;
 mod hot_reload;
+mod max_payload;
 mod metrics;
 mod overflow;
 mod push_to_fanout;

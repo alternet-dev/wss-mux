@@ -15,6 +15,13 @@ pub struct Stream {
     #[serde(rename = "stream")]
     pub name: String,
     pub audience: Vec<String>,
+    /// Optional per-stream payload cap, measured as the length of the
+    /// JSON serialization of the event payload (stable regardless of
+    /// the producer/relay wire codec). Absent ⇒ no cap. A push whose
+    /// payload exceeds it is rejected; in a batch, one oversized event
+    /// rejects the whole batch.
+    #[serde(default)]
+    pub max_payload_bytes: Option<u64>,
 }
 
 #[derive(Debug, Error)]
@@ -41,6 +48,8 @@ pub enum ManifestError {
         "stream `{stream}` audience entry `{entry}` may only use `*` as a single trailing wildcard"
     )]
     InvalidWildcard { stream: String, entry: String },
+    #[error("stream `{0}` has max_payload_bytes: 0, which rejects every event")]
+    ZeroMaxPayload(String),
 }
 
 impl Manifest {
@@ -82,6 +91,12 @@ impl Manifest {
                         entry: entry.clone(),
                     });
                 }
+            }
+            if stream.max_payload_bytes == Some(0) {
+                // A 0 cap rejects every conceivable payload — almost
+                // certainly a misconfiguration. Fail fast rather than
+                // silently black-hole the stream.
+                return Err(ManifestError::ZeroMaxPayload(stream.name.clone()));
             }
             if !seen.insert(stream.name.as_str()) {
                 return Err(ManifestError::DuplicateStream(stream.name.clone()));
@@ -220,6 +235,38 @@ streams:
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         assert!(matches!(err, ManifestError::InvalidWildcard { .. }));
+    }
+
+    #[test]
+    fn parses_optional_max_payload_bytes() {
+        let s = r#"
+version: 1
+streams:
+  - stream: capped
+    audience: [role:member]
+    max_payload_bytes: 4096
+  - stream: uncapped
+    audience: [role:member]
+"#;
+        let m = Manifest::from_str(s, p()).expect("manifest");
+        assert_eq!(m.stream("capped").unwrap().max_payload_bytes, Some(4096));
+        assert_eq!(m.stream("uncapped").unwrap().max_payload_bytes, None);
+    }
+
+    #[test]
+    fn rejects_zero_max_payload() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:member]
+    max_payload_bytes: 0
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        match err {
+            ManifestError::ZeroMaxPayload(name) => assert_eq!(name, "chat_messages"),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]

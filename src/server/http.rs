@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::dispatcher::dispatch;
 use crate::envelope::{EnvelopePaths, EventEnvelope};
-use crate::server::metrics::{RelayFailure, RelayFailureLabel};
+use crate::server::metrics::{RejectReason, RejectReasonLabel, RelayFailure, RelayFailureLabel};
 use crate::server::AppState;
 
 /// Where a batch of events entered the process. A producer push is
@@ -64,9 +64,30 @@ fn accept_events(
     let manifest = state
         .manifest()
         .ok_or((StatusCode::SERVICE_UNAVAILABLE, "manifest not loaded"))?;
+    // All-or-nothing validation: every envelope must reference a known
+    // stream and fit that stream's payload cap before anything is
+    // dispatched or relayed. The cap is measured as JSON-serialized
+    // bytes so it is stable regardless of the producer/relay wire
+    // codec, and is enforced on every origin (defense-in-depth across a
+    // rolling deploy with mixed manifests).
     for envelope in &events {
-        if manifest.stream(&envelope.stream).is_none() {
+        let Some(stream) = manifest.stream(&envelope.stream) else {
             return Err((StatusCode::NOT_FOUND, "unknown stream"));
+        };
+        if let Some(cap) = stream.max_payload_bytes {
+            let size = serde_json::to_vec(&envelope.payload)
+                .map(|b| b.len() as u64)
+                .unwrap_or(0);
+            if size > cap {
+                state
+                    .metrics()
+                    .events_rejected
+                    .get_or_create(&RejectReasonLabel {
+                        reason: RejectReason::PayloadTooLarge,
+                    })
+                    .inc();
+                return Err((StatusCode::PAYLOAD_TOO_LARGE, "payload too large"));
+            }
         }
     }
 
