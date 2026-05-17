@@ -34,8 +34,27 @@ pub fn validate_token(token: &str, signing_key: &str) -> Result<Claims, AuthErro
     }
 }
 
+/// A connection's `principals` are admitted if they satisfy any single
+/// audience entry. An entry is one of:
+/// - `*` — public to *any* authenticated connection (matches even with
+///   no principals; auth already happened at the connection level).
+/// - `prefix*` — a trailing-`*` prefix match (e.g. `role:*` admits
+///   `role:member`); still requires a matching principal.
+/// - anything else — an exact match.
+///
+/// A `*` anywhere but a single trailing position is treated as a
+/// literal here; the manifest rejects such entries at load time, so in
+/// practice only the two wildcard forms above occur.
 pub fn audience_admits(principals: &[String], audience: &[String]) -> bool {
-    audience.iter().any(|a| principals.iter().any(|p| p == a))
+    audience.iter().any(|entry| {
+        if entry == "*" {
+            true
+        } else if let Some(prefix) = entry.strip_suffix('*') {
+            principals.iter().any(|p| p.starts_with(prefix))
+        } else {
+            principals.iter().any(|p| p == entry)
+        }
+    })
 }
 
 #[cfg(test)]
@@ -158,5 +177,58 @@ mod tests {
     fn audience_rejects_empty_audience() {
         let principals = vec!["role:member".into()];
         assert!(!audience_admits(&principals, &[]));
+    }
+
+    #[test]
+    fn bare_star_admits_any_authenticated_connection() {
+        // "public to any authenticated connection" — admits even when
+        // the token carries no principals at all.
+        assert!(audience_admits(&[], &["*".to_string()]));
+        assert!(audience_admits(
+            &["role:guest".to_string()],
+            &["*".to_string()]
+        ));
+    }
+
+    #[test]
+    fn trailing_star_is_a_prefix_match() {
+        let principals = vec!["role:member".to_string()];
+        assert!(audience_admits(&principals, &["role:*".to_string()]));
+        assert!(audience_admits(
+            &["chat_room42".to_string()],
+            &["chat_*".to_string()]
+        ));
+    }
+
+    #[test]
+    fn trailing_star_rejects_non_prefix_principals() {
+        let principals = vec!["tenant:t1".to_string(), "user:bob".to_string()];
+        assert!(!audience_admits(&principals, &["role:*".to_string()]));
+    }
+
+    #[test]
+    fn trailing_star_does_not_admit_empty_principals() {
+        // A prefix wildcard still needs a matching principal; only the
+        // bare `*` is unconditional.
+        assert!(!audience_admits(&[], &["role:*".to_string()]));
+    }
+
+    #[test]
+    fn star_only_matches_as_a_trailing_wildcard_not_inside() {
+        // A non-trailing `*` is treated as a literal (manifest validation
+        // rejects such entries anyway); it must not match by prefix.
+        let principals = vec!["role:member".to_string()];
+        assert!(!audience_admits(&principals, &["ro*le".to_string()]));
+        assert!(audience_admits(
+            &["ro*le".to_string()],
+            &["ro*le".to_string()]
+        ));
+    }
+
+    #[test]
+    fn mixed_audience_admits_on_any_entry() {
+        let principals = vec!["role:member".to_string()];
+        let audience = vec!["tenant:x".to_string(), "role:*".to_string()];
+        assert!(audience_admits(&principals, &audience));
     }
 }

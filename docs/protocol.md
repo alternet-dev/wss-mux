@@ -45,7 +45,11 @@ Fields:
   provide to narrow to one specific key value.
 
 The server checks the connection's principals against the stream's
-audience.
+audience. A principal is admitted if it satisfies any audience entry:
+an exact match, a trailing-`*` prefix match (`role:*` admits
+`role:member`), or the bare `*` which admits any authenticated
+connection (even one whose token carries no principals). A `*` anywhere
+but a single trailing position is rejected at manifest load.
 
 - **Success**: subscription is active. No ack frame.
 - **Failure**: an `error` frame is returned with the appropriate code.

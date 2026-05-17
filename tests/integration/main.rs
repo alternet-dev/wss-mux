@@ -11,3 +11,4 @@ mod rate_limit;
 mod readyz;
 mod reconnect;
 mod relay;
+mod wildcards;

@@ -149,10 +149,38 @@ In practice this file is generated from your application's source of
 truth (RBAC config, code annotations, etc.) and shipped to `wss-mux`
 as part of deployment.
 
+### Audience matching
+
+Each audience entry is matched against the connection's principals in
+one of three ways:
+
+| Entry form | Meaning | Example |
+|---|---|---|
+| exact | principal equals the entry | `role:member` |
+| `prefix*` | a principal starts with `prefix` (trailing `*` only) | `tenant:*` admits `tenant:acme` |
+| `*` | any authenticated connection, even with no principals | "public" stream |
+
+```yaml
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:member, role:operator]
+  - stream: tenant_events
+    audience: [tenant:*]            # any tenant principal
+  - stream: status_page
+    audience: ["*"]                 # public to any authenticated client
+```
+
+A `*` is only valid as a single trailing wildcard (or the bare `*`).
+Any other use — `*foo`, `ro*le`, `a*b*` — is rejected when the
+manifest is loaded (or hot-reloaded), so a malformed grant fails fast
+rather than silently denying. Prefix wildcards still require a matching
+principal; only the bare `*` is unconditional.
+
 Subscribe-time behavior:
 
 - Stream not in the manifest → `unknown_stream` error.
-- Principals don't intersect audience → `unauthorized_subscribe`
+- No audience entry admits the principals → `unauthorized_subscribe`
   error.
 
 ## Deployment patterns
