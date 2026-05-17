@@ -21,7 +21,6 @@ use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
 use crate::registry::Registry;
-use crate::subqueue::SubQueues;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -45,15 +44,16 @@ struct Inner {
     // connection at runtime.
     handshake_verifier: HandshakeVerifier,
     registry: Registry,
-    // Per-(connection, subscription) in-flight accounting. The
-    // dispatcher reserves a slot before enqueuing; the writer releases
-    // once written. A subscription that cannot reserve has overflowed
-    // and is dropped on its own.
-    sub_queues: SubQueues,
-    // The per-connection outbound channel. v0.4 overflow is
-    // per-subscription and keep-open, so there is no longer a
-    // connection-level abort signal here.
-    connections: DashMap<ConnId, OutboundTx>,
+    // Per-connection control channel: connection-level frames, typed
+    // closes, and the keep-open `overflow` error (sent here because the
+    // overflowing subscription's own channel is the thing that's full).
+    // Unbounded — these are low-volume and must never be shed.
+    control: DashMap<ConnId, OutboundTx>,
+    // One channel per (connection, subscription) — the (c) model. Value
+    // is the sender plus the depth it was created with (`0` ⇒
+    // unbounded) for the send-queue-depth metric. The dispatcher sends
+    // events here; the writer drains a `StreamMap` of the receivers.
+    sub_senders: DashMap<(ConnId, String), (OutboundTx, usize)>,
     next_conn_id: AtomicU64,
     metrics: Metrics,
 }
@@ -78,8 +78,8 @@ impl AppState {
                 relay_client,
                 handshake_verifier,
                 registry: Registry::new(),
-                sub_queues: SubQueues::new(),
-                connections: DashMap::new(),
+                control: DashMap::new(),
+                sub_senders: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
                 metrics: Metrics::default(),
             }),
@@ -155,11 +155,6 @@ impl AppState {
         &self.inner.registry
     }
 
-    /// Shared per-subscription in-flight accounting.
-    pub fn sub_queues(&self) -> &SubQueues {
-        &self.inner.sub_queues
-    }
-
     /// The handshake-token verifier built at startup from the
     /// configured HS256 / Ed25519 key(s).
     pub fn handshake_verifier(&self) -> &HandshakeVerifier {
@@ -170,16 +165,51 @@ impl AppState {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register_connection(&self, conn_id: ConnId, data_tx: OutboundTx) {
-        self.inner.connections.insert(conn_id, data_tx);
+    /// Register the per-connection control sender (connection-level
+    /// frames, typed closes, keep-open `overflow` errors).
+    pub fn register_control(&self, conn_id: ConnId, tx: OutboundTx) {
+        self.inner.control.insert(conn_id, tx);
     }
 
-    pub fn unregister_connection(&self, conn_id: ConnId) {
-        self.inner.connections.remove(&conn_id);
+    /// The control sender for a connection, if it is still registered.
+    pub fn control_sender(&self, conn_id: ConnId) -> Option<OutboundTx> {
+        self.inner.control.get(&conn_id).map(|e| e.clone())
     }
 
-    pub fn sender(&self, conn_id: ConnId) -> Option<OutboundTx> {
-        self.inner.connections.get(&conn_id).map(|e| e.clone())
+    /// Register (or replace) the per-subscription event sender. Replace
+    /// is used on a SIGHUP `queue_depth` change to swap in a
+    /// freshly-sized channel; the old sender is dropped, which the
+    /// writer observes and evicts.
+    pub fn register_sub_sender(&self, conn_id: ConnId, sub_id: &str, tx: OutboundTx, cap: usize) {
+        self.inner
+            .sub_senders
+            .insert((conn_id, sub_id.to_string()), (tx, cap));
+    }
+
+    /// The per-subscription sender and the depth it was built with
+    /// (`0` ⇒ unbounded), if the subscription is still live.
+    pub fn sub_sender(&self, conn_id: ConnId, sub_id: &str) -> Option<(OutboundTx, usize)> {
+        self.inner
+            .sub_senders
+            .get(&(conn_id, sub_id.to_string()))
+            .map(|e| e.clone())
+    }
+
+    /// Drop a subscription's sender (unsubscribe / revoke / overflow).
+    /// Dropping it ends the receiver, so the writer evicts that
+    /// subscription from its `StreamMap` on the next poll.
+    pub fn remove_sub_sender(&self, conn_id: ConnId, sub_id: &str) {
+        self.inner
+            .sub_senders
+            .remove(&(conn_id, sub_id.to_string()));
+    }
+
+    /// Tear the connection down: drop its control sender and every
+    /// per-subscription sender. With all senders gone, the writer's
+    /// control channel and `StreamMap` all close and it exits.
+    pub fn remove_connection(&self, conn_id: ConnId) {
+        self.inner.control.remove(&conn_id);
+        self.inner.sub_senders.retain(|(c, _), _| *c != conn_id);
     }
 }
 
@@ -235,11 +265,26 @@ mod tests {
     }
 
     #[test]
-    fn app_state_exposes_shared_sub_queues() {
+    fn sub_senders_and_control_register_and_remove() {
+        use crate::connection::outbound_channel;
         let state = AppState::new(cfg());
-        assert!(state.sub_queues().try_reserve(1, "s1", 1));
-        assert!(!state.sub_queues().try_reserve(1, "s1", 1));
-        assert_eq!(state.sub_queues().in_flight(1, "s1"), 1);
+        let (ctl, _ctl_rx) = outbound_channel(0);
+        state.register_control(1, ctl);
+        assert!(state.control_sender(1).is_some());
+
+        let (tx, _rx) = outbound_channel(8);
+        state.register_sub_sender(1, "s1", tx, 8);
+        assert!(matches!(state.sub_sender(1, "s1"), Some((_, 8))));
+
+        state.remove_sub_sender(1, "s1");
+        assert!(state.sub_sender(1, "s1").is_none());
+
+        // Connection teardown drops control + any remaining sub senders.
+        let (tx2, _rx2) = outbound_channel(0);
+        state.register_sub_sender(1, "s2", tx2, 0);
+        state.remove_connection(1);
+        assert!(state.control_sender(1).is_none());
+        assert!(state.sub_sender(1, "s2").is_none());
     }
 
     #[test]

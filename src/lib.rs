@@ -9,4 +9,3 @@ pub mod peers;
 pub mod ratelimit;
 pub mod registry;
 pub mod server;
-pub mod subqueue;

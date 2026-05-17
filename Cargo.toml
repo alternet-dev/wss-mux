@@ -24,6 +24,7 @@ path = "tests/integration/main.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-stream = "0.1"
 axum = { version = "0.7", features = ["ws", "macros"] }
 tokio-tungstenite = "0.21"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
