@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, watch};
 use crate::config::Config;
 use crate::connection::{ConnId, Outbound};
 use crate::manifest::{Manifest, ManifestError};
+use crate::peers::PeerUrl;
 use crate::registry::Registry;
 
 #[derive(Clone)]
@@ -31,6 +32,12 @@ struct Inner {
     // borrow() read on the dispatch/subscribe path and a change signal
     // connections subscribe to for re-validation.
     manifest_tx: watch::Sender<Option<Arc<Manifest>>>,
+    // Discovered peer set, refreshed by the discovery task. Same
+    // watch pattern as the manifest: cheap borrow() on the relay path,
+    // single writer (the refresh task / tests via set_peers).
+    peers_tx: watch::Sender<Arc<Vec<PeerUrl>>>,
+    // Built once at startup from PeerConfig (timeout + optional TLS).
+    relay_client: reqwest::Client,
     registry: Registry,
     connections: DashMap<ConnId, ConnectionHandle>,
     next_conn_id: AtomicU64,
@@ -47,18 +54,31 @@ struct ConnectionHandle {
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Self {
+    /// Fallible constructor: builds the relay HTTP client from the peer
+    /// TLS config, so a bad CA/cert path fails startup loudly rather
+    /// than silently degrading.
+    pub fn try_new(config: Config) -> anyhow::Result<Self> {
+        let relay_client = crate::peers::build_relay_client(&config.peers)?;
         let (manifest_tx, _) = watch::channel(None);
-        Self {
+        let (peers_tx, _) = watch::channel(Arc::new(Vec::new()));
+        Ok(Self {
             inner: Arc::new(Inner {
                 config,
                 manifest_tx,
+                peers_tx,
+                relay_client,
                 registry: Registry::new(),
                 connections: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
                 metrics: Metrics::default(),
             }),
-        }
+        })
+    }
+
+    /// Infallible constructor for tests and call sites with a known-good
+    /// (default/plaintext) peer config.
+    pub fn new(config: Config) -> Self {
+        Self::try_new(config).expect("relay client build (default peer config is always valid)")
     }
 
     pub fn metrics(&self) -> &Metrics {
@@ -89,6 +109,25 @@ impl AppState {
     /// subscriptions when the manifest changes.
     pub fn subscribe_manifest(&self) -> watch::Receiver<Option<Arc<Manifest>>> {
         self.inner.manifest_tx.subscribe()
+    }
+
+    /// Current peer-set snapshot. Cheap `Arc` clone, independent of a
+    /// concurrent discovery refresh.
+    pub fn peers(&self) -> Arc<Vec<PeerUrl>> {
+        self.inner.peers_tx.borrow().clone()
+    }
+
+    /// Replace the peer set (discovery refresh task, or tests). Also
+    /// publishes the `wss_mux_peers_known` gauge so it tracks the live
+    /// set from a single place.
+    pub fn set_peers(&self, peers: Vec<PeerUrl>) {
+        self.inner.metrics.peers_known.set(peers.len() as i64);
+        self.inner.peers_tx.send_replace(Arc::new(peers));
+    }
+
+    /// The shared relay HTTP client (per-relay timeout + optional TLS).
+    pub fn relay_client(&self) -> &reqwest::Client {
+        &self.inner.relay_client
     }
 
     /// Load the manifest from `path` and swap it in. Returns the stream
