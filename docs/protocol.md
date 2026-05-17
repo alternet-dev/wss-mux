@@ -15,7 +15,11 @@ type until auth succeeds.
 { "type": "auth", "token": "<signed-token>" }
 ```
 
-The server validates the signature and TTL of the token.
+The server validates the signature and TTL of the token. The token is
+a JWT signed with **HS256** or **Ed25519 (EdDSA)**; the accepted
+algorithm is pinned to the server's configured key (the token's `alg`
+only selects which configured key, never widening what is accepted).
+See `docs/embedding.md` for key configuration.
 
 - **Success**: connection enters the authenticated state. No ack frame
   is sent — the absence of a `close` is the ack.

@@ -12,7 +12,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::auth::{audience_admits, validate_token, AuthError};
+use crate::auth::{audience_admits, AuthError};
 use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx, OutboundTx};
 use crate::envelope::{ClientFrame, ServerFrame};
 use crate::error::ProtocolError;
@@ -322,7 +322,7 @@ async fn reader_loop(
                 if principals.is_some() {
                     continue;
                 }
-                match validate_token(&token, &state.config().handshake_signing_key) {
+                match state.handshake_verifier().validate(&token) {
                     Ok(claims) => {
                         tracing::debug!(conn_id, sub = %claims.sub, "authenticated");
                         principals = Some(claims.principals);

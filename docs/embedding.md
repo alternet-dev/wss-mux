@@ -101,8 +101,24 @@ before it connects:
 }
 ```
 
-Signed with HS256 using `WSS_MUX_HANDSHAKE_SIGNING_KEY` (shared
-between your auth service and `wss-mux`).
+Signed with **HS256** using `WSS_MUX_HANDSHAKE_SIGNING_KEY` (a shared
+secret between your auth service and `wss-mux`) **or Ed25519 (EdDSA)**,
+where `wss-mux` holds only the public key:
+
+- `WSS_MUX_HANDSHAKE_SIGNING_KEY` — HS256 shared secret.
+- `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY` — Ed25519 public key, inline
+  PEM; or `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` — path to a PEM
+  file (asymmetric: the private signing key never leaves your issuer —
+  good for key rotation and least-privilege).
+
+At least one must be set; setting both lets you migrate issuers with
+zero downtime (old HS256 clients and new Ed25519 clients are both
+accepted during the cutover). The accepted algorithm is **pinned to
+the configured key** — a token's `alg` header only selects *which*
+configured key to verify against, it can never widen what's accepted,
+so an attacker who knows the Ed25519 public key cannot replay it as an
+HS256 secret. A bad key fails startup loudly rather than rejecting
+every connection at runtime.
 
 Required claims:
 

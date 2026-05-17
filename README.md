@@ -127,7 +127,9 @@ All configuration is environment variables, read once at startup.
 | Var | Default | Meaning |
 |---|---|---|
 | `WSS_MUX_PUSH_AUTH_TOKEN` | — (required) | shared bearer secret for `POST /v1/events*` |
-| `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — (required) | HS256 key the client-token issuer signs with |
+| `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — | HS256 client-token secret; optional if an Ed25519 key is set |
+| `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY` | — | Ed25519 (EdDSA) client-token public key, inline PEM |
+| `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |
 | `WSS_MUX_STREAMS_MANIFEST_PATH` | — (required) | path to the YAML stream manifest |
 | `WSS_MUX_LISTEN_ADDR` | `0.0.0.0:8080` | bind address for HTTP + WebSocket |
 | `WSS_MUX_QUEUE_DEPTH` | `1024` | per-connection send-queue depth before overflow-close |
