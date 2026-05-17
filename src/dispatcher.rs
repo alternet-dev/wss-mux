@@ -1,4 +1,4 @@
-use crate::connection::Outbound;
+use crate::connection::{Outbound, SendError};
 use crate::envelope::{EventEnvelope, ServerFrame};
 use crate::error::ProtocolError;
 use crate::server::metrics::{DropReason, DropReasonLabel, StreamLabel};
@@ -32,12 +32,21 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
         stream: envelope.stream.clone(),
     };
 
-    // Effective per-subscription in-flight cap: the stream's manifest
-    // `queue_depth` override if set, else the global default.
-    let cap = state
+    // Effective per-subscription in-flight cap. `None` = unlimited:
+    // the stream's manifest `queue_depth` if set (0 ⇒ unlimited), else
+    // the global `WSS_MUX_QUEUE_DEPTH` (0 ⇒ unlimited). An unlimited
+    // subscription skips the reservation gate entirely.
+    let cap: Option<usize> = match state
         .manifest()
         .and_then(|m| m.stream(&envelope.stream).and_then(|s| s.queue_depth))
-        .unwrap_or(state.config().queue_depth);
+    {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => match state.config().queue_depth {
+            0 => None,
+            n => Some(n),
+        },
+    };
 
     for (conn_id, sub_id) in matches {
         let Some(sender) = state.sender(conn_id) else {
@@ -52,29 +61,39 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
             continue;
         };
 
-        if !state.sub_queues().try_reserve(conn_id, &sub_id, cap) {
-            // Subscription is at its in-flight cap: per-subscription
-            // overflow. Drop only this subscription — keep-open error
-            // frame, unsubscribe it, forget its accounting. The
-            // connection and its other subscriptions are unaffected.
-            let _ = sender.try_send(ProtocolError::Overflow { id: sub_id.clone() }.to_outbound());
-            state
-                .registry()
-                .unsubscribe(&envelope.stream, conn_id, &sub_id);
-            state.sub_queues().drop_sub(conn_id, &sub_id);
-            stats.dropped_full += 1;
-            state
-                .metrics()
-                .events_dropped
-                .get_or_create(&DropReasonLabel {
-                    reason: DropReason::Overflow,
-                })
-                .inc();
-            continue;
+        if let Some(cap) = cap {
+            if !state.sub_queues().try_reserve(conn_id, &sub_id, cap) {
+                // Subscription is at its in-flight cap: per-subscription
+                // overflow. Drop only this subscription — keep-open
+                // error frame, unsubscribe it, forget its accounting.
+                // The connection and its other subscriptions are
+                // unaffected.
+                let _ =
+                    sender.try_send(ProtocolError::Overflow { id: sub_id.clone() }.to_outbound());
+                state
+                    .registry()
+                    .unsubscribe(&envelope.stream, conn_id, &sub_id);
+                state.sub_queues().drop_sub(conn_id, &sub_id);
+                stats.dropped_full += 1;
+                state
+                    .metrics()
+                    .events_dropped
+                    .get_or_create(&DropReasonLabel {
+                        reason: DropReason::Overflow,
+                    })
+                    .inc();
+                continue;
+            }
         }
+        // cap == None ⇒ unlimited: no reservation, never per-sub
+        // overflow for depth (bounded only by the shared channel).
 
-        let queue_used = state.config().queue_depth.saturating_sub(sender.capacity());
-        state.metrics().send_queue_depth.observe(queue_used as f64);
+        // Depth metric only applies to a bounded channel; an unbounded
+        // (unlimited) connection has no meaningful queue depth.
+        if let Some(remaining) = sender.capacity() {
+            let queue_used = state.config().queue_depth.saturating_sub(remaining);
+            state.metrics().send_queue_depth.observe(queue_used as f64);
+        }
 
         let frame = ServerFrame::Event {
             id: sub_id.clone(),
@@ -91,7 +110,7 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
                     .get_or_create(&stream_label)
                     .inc();
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            Err(SendError::Full) => {
                 // Shared per-connection channel is saturated. The slot
                 // reserved above never reached the writer (which would
                 // release it), so release it here. The frame is dropped
@@ -108,7 +127,7 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
                     })
                     .inc();
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+            Err(SendError::Closed) => {
                 // Writer is gone; release the slot we just reserved.
                 state.sub_queues().release(conn_id, &sub_id);
                 stats.dropped_closed += 1;
@@ -129,6 +148,7 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::connection::OutboundTx;
     use crate::manifest::Manifest;
     use serde_json::json;
     use std::path::Path;
@@ -154,7 +174,7 @@ mod tests {
     fn closed_channel_counts_as_dropped_closed() {
         let state = AppState::new(test_config(1));
         let (data_tx, data_rx) = mpsc::channel::<Outbound>(1);
-        state.register_connection(7, data_tx);
+        state.register_connection(7, OutboundTx::Bounded(data_tx));
         state
             .registry()
             .subscribe("chat_messages", 7, "s1".into(), None);
@@ -178,7 +198,7 @@ mod tests {
     fn happy_path_delivers_to_subscribed_connection() {
         let state = AppState::new(test_config(8));
         let (data_tx, mut data_rx) = mpsc::channel::<Outbound>(8);
-        state.register_connection(1, data_tx);
+        state.register_connection(1, OutboundTx::Bounded(data_tx));
         state
             .registry()
             .subscribe("chat_messages", 1, "s1".into(), None);
@@ -204,7 +224,7 @@ mod tests {
     fn dispatch_reserves_a_subscription_slot() {
         let state = AppState::new(test_config(8));
         let (data_tx, _data_rx) = mpsc::channel::<Outbound>(8);
-        state.register_connection(1, data_tx);
+        state.register_connection(1, OutboundTx::Bounded(data_tx));
         state
             .registry()
             .subscribe("chat_messages", 1, "s1".into(), None);
@@ -229,7 +249,7 @@ mod tests {
         // cap (no manifest) == global queue_depth == 2.
         let state = AppState::new(test_config(2));
         let (data_tx, mut data_rx) = mpsc::channel::<Outbound>(8);
-        state.register_connection(1, data_tx);
+        state.register_connection(1, OutboundTx::Bounded(data_tx));
         state
             .registry()
             .subscribe("chat_messages", 1, "s1".into(), None);
@@ -289,7 +309,7 @@ mod tests {
         // limiter here; the small shared channel is.
         let state = AppState::new(test_config(64));
         let (data_tx, _data_rx) = mpsc::channel::<Outbound>(1);
-        state.register_connection(1, data_tx.clone());
+        state.register_connection(1, OutboundTx::Bounded(data_tx.clone()));
         state
             .registry()
             .subscribe("chat_messages", 1, "s1".into(), None);
@@ -352,7 +372,7 @@ mod tests {
             .expect("valid manifest"),
         );
         let (data_tx, _data_rx) = mpsc::channel::<Outbound>(8);
-        state.register_connection(1, data_tx);
+        state.register_connection(1, OutboundTx::Bounded(data_tx));
         state
             .registry()
             .subscribe("chat_messages", 1, "s1".into(), None);
@@ -385,6 +405,51 @@ mod tests {
             state.registry().matches("chat_messages", None).is_empty(),
             "manifest queue_depth:1 must cap this stream at 1 in-flight, \
              not the global 64"
+        );
+    }
+
+    #[test]
+    fn queue_depth_zero_means_unlimited_no_per_sub_cap() {
+        // Stream sets queue_depth: 0 → explicit unlimited. The
+        // dispatcher must skip the per-subscription reservation
+        // entirely: no overflow, no in-flight accounting, every event
+        // delivered (bounded only by the shared channel, ample here).
+        let state = AppState::new(test_config(4));
+        state.set_manifest(
+            Manifest::from_str(
+                "version: 1\n\
+                 streams:\n  \
+                 - stream: chat_messages\n    \
+                 audience: [role:x]\n    \
+                 queue_depth: 0\n",
+                Path::new("test.yaml"),
+            )
+            .expect("valid manifest"),
+        );
+        let (data_tx, _data_rx) = mpsc::channel::<Outbound>(64);
+        state.register_connection(1, OutboundTx::Bounded(data_tx));
+        state
+            .registry()
+            .subscribe("chat_messages", 1, "s1".into(), None);
+
+        for i in 0..20 {
+            let s = dispatch(
+                &state,
+                EventEnvelope {
+                    stream: "chat_messages".into(),
+                    key: None,
+                    payload: json!({ "i": i }),
+                },
+            );
+            assert_eq!(s.delivered, 1, "event {i} must be delivered");
+            assert_eq!(s.dropped_full, 0, "unlimited stream must not overflow");
+        }
+        // No reservation is ever taken for an unlimited subscription.
+        assert_eq!(state.sub_queues().in_flight(1, "s1"), 0);
+        // Subscription is still alive (never overflow-dropped).
+        assert_eq!(
+            state.registry().matches("chat_messages", None),
+            vec![(1u64, "s1".to_string())]
         );
     }
 

@@ -127,7 +127,11 @@ per-connection ones and any optional metric pushers.
 
 Per connection: `queue_depth × avg_frame_size` bytes (default
 1024 × ~1KB ≈ 1MB ceiling). Closed connections release memory
-immediately.
+immediately. Setting `WSS_MUX_QUEUE_DEPTH=0` (explicit "unlimited")
+removes this ceiling — the per-connection channel becomes unbounded,
+so a stalled or non-reading client can grow memory without limit.
+That is an opt-in tradeoff for deployments that must never drop
+events and trust their consumers to keep up.
 
 Per stream: O(active subscriptions). Each subscription is a small
 struct (≈64 bytes).

@@ -10,10 +10,10 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 use crate::auth::{audience_admits, validate_token, AuthError};
-use crate::connection::{ConnId, Outbound};
+use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx, OutboundTx};
 use crate::envelope::{ClientFrame, ServerFrame};
 use crate::error::ProtocolError;
 use crate::manifest::Manifest;
@@ -84,7 +84,7 @@ fn encode_frame(codec: Codec, frame: &ServerFrame) -> Option<Message> {
 
 async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
     let conn_id = state.next_conn_id();
-    let (data_tx, data_rx) = mpsc::channel::<Outbound>(state.config().queue_depth);
+    let (data_tx, data_rx) = outbound_channel(state.config().queue_depth);
     state.register_connection(conn_id, data_tx.clone());
 
     state.metrics().connections_total.inc();
@@ -104,7 +104,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
 
 async fn writer_loop(
     mut writer: SplitSink<WebSocket, Message>,
-    mut rx: mpsc::Receiver<Outbound>,
+    mut rx: OutboundRx,
     codec: Codec,
     conn_id: ConnId,
     state: AppState,
@@ -219,7 +219,7 @@ async fn reader_loop(
     mut reader: SplitStream<WebSocket>,
     conn_id: ConnId,
     state: &AppState,
-    tx: mpsc::Sender<Outbound>,
+    tx: OutboundTx,
     mut manifest_rx: watch::Receiver<Option<Arc<Manifest>>>,
     codec: Codec,
 ) {

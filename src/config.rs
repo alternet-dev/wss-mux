@@ -110,8 +110,6 @@ pub enum ConfigError {
         #[source]
         source: ParseIntError,
     },
-    #[error("WSS_MUX_QUEUE_DEPTH must be greater than zero")]
-    ZeroQueueDepth,
     #[error("invalid {var} `{value}`: {source}")]
     InvalidUnsigned {
         var: &'static str,
@@ -153,14 +151,12 @@ impl Config {
 
         let queue_depth = match get("WSS_MUX_QUEUE_DEPTH") {
             Some(v) => {
-                let parsed: usize = v.parse().map_err(|source| ConfigError::InvalidQueueDepth {
+                // `0` is the explicit "unlimited" signal (resolved in
+                // the dispatcher); a literal 0-depth queue has no use.
+                v.parse().map_err(|source| ConfigError::InvalidQueueDepth {
                     value: v.clone(),
                     source,
-                })?;
-                if parsed == 0 {
-                    return Err(ConfigError::ZeroQueueDepth);
-                }
-                parsed
+                })?
             }
             None => DEFAULT_QUEUE_DEPTH,
         };
@@ -381,11 +377,13 @@ mod tests {
     }
 
     #[test]
-    fn zero_queue_depth_is_error() {
+    fn zero_queue_depth_means_unlimited() {
+        // `0` is the explicit "unlimited" signal (a 0-depth queue would
+        // be useless as a literal), so it parses rather than erroring.
         let mut pairs = minimal();
         pairs.push(("WSS_MUX_QUEUE_DEPTH", "0"));
-        let err = Config::from_getter(env(&pairs)).expect_err("error");
-        assert!(matches!(err, ConfigError::ZeroQueueDepth));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.queue_depth, 0);
     }
 
     #[test]

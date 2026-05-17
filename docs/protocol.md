@@ -136,6 +136,13 @@ subscriptions continue. A client that still wants the stream simply
 whole connection with WebSocket code `4429`; that connection-level
 overflow close no longer exists.
 
+A `queue_depth` of `0` at either scope means **unlimited** (explicit
+opt-in): that subscription is never overflow-dropped for depth. A
+global `WSS_MUX_QUEUE_DEPTH=0` makes the per-connection buffer
+unbounded — no `overflow` is ever emitted, at the cost of the
+per-connection memory bound (a stalled client can OOM the instance).
+See `docs/embedding.md`.
+
 ## Connection lifecycle
 
 ```

@@ -214,9 +214,9 @@ streams:
 
 ### Per-stream queue depth
 
-Each subscription has a bounded in-flight send queue. The cap is the
-global `WSS_MUX_QUEUE_DEPTH` (default `1024`) unless the stream
-overrides it:
+Each subscription has an in-flight send-queue cap. It resolves as: the
+stream's manifest `queue_depth` if set, else the global
+`WSS_MUX_QUEUE_DEPTH` (default `1024`).
 
 ```yaml
 version: 1
@@ -224,6 +224,9 @@ streams:
   - stream: chat_messages
     audience: [role:member]
     queue_depth: 64               # this stream's subscribers are bursty-tolerant
+  - stream: audit_log
+    audience: [role:admin]
+    queue_depth: 0                # never drop audit events for slowness
 ```
 
 - Scope is **per subscription**, not per connection: a connection
@@ -234,11 +237,24 @@ streams:
   `id`, and the connection plus its other subscriptions keep running.
   The client can `subscribe` again to resume. A slow consumer on one
   stream no longer tears down the whole connection.
-- Absent ⇒ the global default. `0` is rejected at manifest load (it
-  would drop every event on the stream).
+- Absent ⇒ the global default.
+- **`0` means unlimited** (explicit opt-in), at either scope — a
+  literal 0-depth queue would be useless, so `0` is the "no cap"
+  signal rather than a load error:
+  - Per-stream `queue_depth: 0` ⇒ that subscription is never
+    overflow-dropped for depth (still bounded by the connection's
+    shared channel, which is `WSS_MUX_QUEUE_DEPTH`-sized).
+  - Global `WSS_MUX_QUEUE_DEPTH=0` ⇒ the per-connection channel is
+    **unbounded**. Nothing is dropped for backpressure anywhere.
+    ⚠️ This removes the per-connection memory bound: one stalled or
+    non-reading client can grow memory without limit and OOM the
+    instance. Use it only when consumers are trusted to keep up (or
+    bounded by other means). The bounded default exists for this
+    reason.
 - Tune it per stream: raise it for high-rate streams whose clients
   tolerate bursts, lower it to shed load faster on streams where
-  staleness is worse than a gap.
+  staleness is worse than a gap, set `0` where dropping is never
+  acceptable and you accept the memory tradeoff.
 
 ## Deployment patterns
 

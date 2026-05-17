@@ -13,10 +13,10 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
 use dashmap::DashMap;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 use crate::config::Config;
-use crate::connection::{ConnId, Outbound};
+use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
 use crate::registry::Registry;
@@ -48,7 +48,7 @@ struct Inner {
     // The per-connection outbound channel. v0.4 overflow is
     // per-subscription and keep-open, so there is no longer a
     // connection-level abort signal here.
-    connections: DashMap<ConnId, mpsc::Sender<Outbound>>,
+    connections: DashMap<ConnId, OutboundTx>,
     next_conn_id: AtomicU64,
     metrics: Metrics,
 }
@@ -154,7 +154,7 @@ impl AppState {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register_connection(&self, conn_id: ConnId, data_tx: mpsc::Sender<Outbound>) {
+    pub fn register_connection(&self, conn_id: ConnId, data_tx: OutboundTx) {
         self.inner.connections.insert(conn_id, data_tx);
     }
 
@@ -162,7 +162,7 @@ impl AppState {
         self.inner.connections.remove(&conn_id);
     }
 
-    pub fn sender(&self, conn_id: ConnId) -> Option<mpsc::Sender<Outbound>> {
+    pub fn sender(&self, conn_id: ConnId) -> Option<OutboundTx> {
         self.inner.connections.get(&conn_id).map(|e| e.clone())
     }
 }

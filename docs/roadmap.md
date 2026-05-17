@@ -72,8 +72,10 @@ Out of scope:
   too slow for one stream now gets a keep-open `overflow` `error`
   frame and that subscription alone is dropped, instead of the whole
   connection closing with `4429`. The pre-v0.4 connection-level
-  overflow close no longer exists. See `docs/protocol.md` and
-  `docs/embedding.md`.
+  overflow close no longer exists. `queue_depth: 0` / global
+  `WSS_MUX_QUEUE_DEPTH=0` is an explicit "unlimited" opt-in (global 0
+  ⇒ unbounded per-connection channel, trading the memory bound for
+  never dropping). See `docs/protocol.md` and `docs/embedding.md`.
 - Ed25519 keypair token signing (in addition to HS256).
 - Optional OIDC token validation as an alternative to signed-handshake
   tokens.
