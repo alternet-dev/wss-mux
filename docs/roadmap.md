@@ -45,12 +45,28 @@ Out of scope:
 
 ## v0.3
 
-- Optional Redis pubsub adapter for cross-instance fanout without
-  producer broadcast amplification. Cargo feature; off by default.
-- Per-stream queue depth override.
+- **Peer-relay cross-instance fanout.** An instance that receives a
+  producer push relays it once to its discovered peers; every instance
+  fans out to its own clients. Producer write-count is O(1) in the
+  instance count and the producer contract is unchanged (still
+  `POST /v1/events`). Discovery is DNS-based (a conventional headless
+  Service name, composed from an auto-detected namespace) with a
+  static-list fallback for non-k8s; zero new external infrastructure
+  and zero new external dependency-class. Runtime-config gated (active
+  by default, inert with no resolvable peers ⇒ byte-identical to
+  single-instance). *Supersedes the previously-planned Redis pubsub
+  adapter, which was rejected for imposing external infra contrary to
+  the project's infrastructure-agnostic pitch.*
+- Stream wildcards in manifest audiences (trailing `*` prefix match).
+- Per-stream max-payload-size (manifest cap; oversized push rejected).
+- Operational runbooks (`docs/operations.md`).
 
 ## v0.4
 
+- Per-stream queue-depth override, implemented as per-subscription send
+  queues (replaces the per-connection single queue; changes overflow
+  wire-semantics from per-connection close to per-subscription —
+  designed as its own spec).
 - Ed25519 keypair token signing (in addition to HS256).
 - Optional OIDC token validation as an alternative to signed-handshake
   tokens.
