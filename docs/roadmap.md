@@ -63,10 +63,17 @@ Out of scope:
 
 ## v0.4
 
-- Per-stream queue-depth override, implemented as per-subscription send
-  queues (replaces the per-connection single queue; changes overflow
-  wire-semantics from per-connection close to per-subscription —
-  designed as its own spec).
+- ~~Per-stream queue-depth override.~~ Shipped. A subscription's
+  in-flight send queue is bounded by the stream's manifest
+  `queue_depth` (else the global `WSS_MUX_QUEUE_DEPTH`), tracked as
+  per-`(connection, subscription)` in-flight accounting over the
+  retained single per-connection channel — not a separate channel per
+  subscription. This changed the overflow wire-semantics: a subscriber
+  too slow for one stream now gets a keep-open `overflow` `error`
+  frame and that subscription alone is dropped, instead of the whole
+  connection closing with `4429`. The pre-v0.4 connection-level
+  overflow close no longer exists. See `docs/protocol.md` and
+  `docs/embedding.md`.
 - Ed25519 keypair token signing (in addition to HS256).
 - Optional OIDC token validation as an alternative to signed-handshake
   tokens.

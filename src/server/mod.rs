@@ -42,21 +42,15 @@ struct Inner {
     registry: Registry,
     // Per-(connection, subscription) in-flight accounting. The
     // dispatcher reserves a slot before enqueuing; the writer releases
-    // once written. Wired here in PR1; the dispatch/overflow path
-    // starts using it in the per-subscription-overflow PR.
+    // once written. A subscription that cannot reserve has overflowed
+    // and is dropped on its own.
     sub_queues: SubQueues,
-    connections: DashMap<ConnId, ConnectionHandle>,
+    // The per-connection outbound channel. v0.4 overflow is
+    // per-subscription and keep-open, so there is no longer a
+    // connection-level abort signal here.
+    connections: DashMap<ConnId, mpsc::Sender<Outbound>>,
     next_conn_id: AtomicU64,
     metrics: Metrics,
-}
-
-/// Per-connection plumbing. The data channel carries normal outbound frames
-/// from the dispatcher and reader. The abort channel is a watch of `false`
-/// transitioning to `true` exactly once, signaling the reader and writer to
-/// short-circuit out of their loops for an overflow close.
-struct ConnectionHandle {
-    data_tx: mpsc::Sender<Outbound>,
-    abort_tx: watch::Sender<bool>,
 }
 
 impl AppState {
@@ -160,15 +154,8 @@ impl AppState {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub fn register_connection(
-        &self,
-        conn_id: ConnId,
-        data_tx: mpsc::Sender<Outbound>,
-        abort_tx: watch::Sender<bool>,
-    ) {
-        self.inner
-            .connections
-            .insert(conn_id, ConnectionHandle { data_tx, abort_tx });
+    pub fn register_connection(&self, conn_id: ConnId, data_tx: mpsc::Sender<Outbound>) {
+        self.inner.connections.insert(conn_id, data_tx);
     }
 
     pub fn unregister_connection(&self, conn_id: ConnId) {
@@ -176,19 +163,7 @@ impl AppState {
     }
 
     pub fn sender(&self, conn_id: ConnId) -> Option<mpsc::Sender<Outbound>> {
-        self.inner
-            .connections
-            .get(&conn_id)
-            .map(|e| e.data_tx.clone())
-    }
-
-    /// Atomically remove the connection from the registry of senders and
-    /// flip its abort signal to `true`. Idempotent — a second call for the
-    /// same conn_id is a no-op.
-    pub fn trigger_overflow(&self, conn_id: ConnId) {
-        if let Some((_, handle)) = self.inner.connections.remove(&conn_id) {
-            let _ = handle.abort_tx.send(true);
-        }
+        self.inner.connections.get(&conn_id).map(|e| e.clone())
     }
 }
 

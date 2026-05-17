@@ -212,6 +212,34 @@ streams:
 - Batch semantics are all-or-nothing: one oversized event rejects the
   whole batch with `413`; nothing is dispatched.
 
+### Per-stream queue depth
+
+Each subscription has a bounded in-flight send queue. The cap is the
+global `WSS_MUX_QUEUE_DEPTH` (default `1024`) unless the stream
+overrides it:
+
+```yaml
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:member]
+    queue_depth: 64               # this stream's subscribers are bursty-tolerant
+```
+
+- Scope is **per subscription**, not per connection: a connection
+  with several subscriptions gets the cap independently for each.
+- When a subscription exceeds its cap (a consumer too slow for the
+  stream's event rate), only that subscription is dropped: the client
+  gets an `error` frame with `code: "overflow"` and the subscription
+  `id`, and the connection plus its other subscriptions keep running.
+  The client can `subscribe` again to resume. A slow consumer on one
+  stream no longer tears down the whole connection.
+- Absent ⇒ the global default. `0` is rejected at manifest load (it
+  would drop every event on the stream).
+- Tune it per stream: raise it for high-rate streams whose clients
+  tolerate bursts, lower it to shed load faster on streams where
+  staleness is worse than a gap.
+
 ## Deployment patterns
 
 `wss-mux` is a single binary that listens on one port for both HTTP
