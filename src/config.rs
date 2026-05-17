@@ -1,8 +1,14 @@
 use std::net::{AddrParseError, SocketAddr};
 use std::num::ParseIntError;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use thiserror::Error;
+
+use crate::peers::{
+    self, PeerUrl, DEFAULT_CLUSTER_DOMAIN, DEFAULT_DNS_REFRESH_SECS, DEFAULT_PEER_SERVICE,
+    DEFAULT_RELAY_TIMEOUT_MS,
+};
 
 pub const DEFAULT_LISTEN_ADDR: &str = "0.0.0.0:8080";
 pub const DEFAULT_QUEUE_DEPTH: usize = 1024;
@@ -33,6 +39,59 @@ pub struct Config {
     /// Token-bucket capacity — the largest instantaneous burst allowed
     /// before the steady rate applies.
     pub inbound_burst: u32,
+    /// Cross-instance peer-relay discovery + transport settings.
+    pub peers: PeerConfig,
+}
+
+/// Peer-relay discovery and transport configuration. Every field has a
+/// safe default; with no `WSS_MUX_PEER_*` env set the conventional
+/// zero-config k8s headless-Service FQDN is composed and resolved, and
+/// resolving nothing keeps behaviour byte-identical to a single
+/// instance.
+#[derive(Debug, Clone)]
+pub struct PeerConfig {
+    /// `false` only when `WSS_MUX_PEER_RELAY=off` — a hard kill-switch
+    /// that also silences the periodic DNS query.
+    pub relay_enabled: bool,
+    /// Headless Service name for the composed FQDN.
+    pub service: String,
+    /// Explicit namespace override; `None` ⇒ auto-read from the
+    /// ServiceAccount file at discovery time.
+    pub namespace_override: Option<String>,
+    /// Cluster DNS domain for the composed FQDN.
+    pub cluster_domain: String,
+    /// Full FQDN override; skips the composed name when set.
+    pub peer_dns: Option<String>,
+    /// Fixed peer fleet (non-k8s); when non-empty, DNS is not polled.
+    pub static_peers: Vec<PeerUrl>,
+    /// Per-relay request timeout.
+    pub relay_timeout: Duration,
+    /// DNS re-resolution interval.
+    pub dns_refresh: Duration,
+    /// Private CA to trust for `https://` peers.
+    pub ca_file: Option<PathBuf>,
+    /// Client certificate for mutual TLS to peers.
+    pub client_cert: Option<PathBuf>,
+    /// Client key for mutual TLS to peers.
+    pub client_key: Option<PathBuf>,
+}
+
+impl Default for PeerConfig {
+    fn default() -> Self {
+        PeerConfig {
+            relay_enabled: true,
+            service: DEFAULT_PEER_SERVICE.to_string(),
+            namespace_override: None,
+            cluster_domain: DEFAULT_CLUSTER_DOMAIN.to_string(),
+            peer_dns: None,
+            static_peers: Vec::new(),
+            relay_timeout: Duration::from_millis(DEFAULT_RELAY_TIMEOUT_MS),
+            dns_refresh: Duration::from_secs(DEFAULT_DNS_REFRESH_SECS),
+            ca_file: None,
+            client_cert: None,
+            client_key: None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -60,6 +119,8 @@ pub enum ConfigError {
         #[source]
         source: ParseIntError,
     },
+    #[error("invalid WSS_MUX_PEERS: {0}")]
+    InvalidPeers(#[source] peers::PeerUrlError),
 }
 
 impl Config {
@@ -124,6 +185,48 @@ impl Config {
         let inbound_rate_per_sec = parse_u32("WSS_MUX_INBOUND_RATE", DEFAULT_INBOUND_RATE)?;
         let inbound_burst = parse_u32("WSS_MUX_INBOUND_BURST", DEFAULT_INBOUND_BURST)?;
 
+        let parse_u64 = |var: &'static str, default: u64| -> Result<u64, ConfigError> {
+            match get(var) {
+                Some(v) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
+                    var,
+                    value: v.clone(),
+                    source,
+                }),
+                None => Ok(default),
+            }
+        };
+        let non_blank = |v: Option<String>| -> Option<String> {
+            v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+        };
+
+        let peers = PeerConfig {
+            relay_enabled: match get("WSS_MUX_PEER_RELAY") {
+                Some(v) => !v.trim().eq_ignore_ascii_case("off"),
+                None => true,
+            },
+            service: non_blank(get("WSS_MUX_PEER_SERVICE"))
+                .unwrap_or_else(|| DEFAULT_PEER_SERVICE.to_string()),
+            namespace_override: non_blank(get("WSS_MUX_PEER_NAMESPACE")),
+            cluster_domain: non_blank(get("WSS_MUX_CLUSTER_DOMAIN"))
+                .unwrap_or_else(|| DEFAULT_CLUSTER_DOMAIN.to_string()),
+            peer_dns: non_blank(get("WSS_MUX_PEER_DNS")),
+            static_peers: match non_blank(get("WSS_MUX_PEERS")) {
+                Some(csv) => peers::parse_static_peers(&csv).map_err(ConfigError::InvalidPeers)?,
+                None => Vec::new(),
+            },
+            relay_timeout: Duration::from_millis(parse_u64(
+                "WSS_MUX_PEER_RELAY_TIMEOUT_MS",
+                DEFAULT_RELAY_TIMEOUT_MS,
+            )?),
+            dns_refresh: Duration::from_secs(parse_u64(
+                "WSS_MUX_PEER_DNS_REFRESH_SECS",
+                DEFAULT_DNS_REFRESH_SECS,
+            )?),
+            ca_file: non_blank(get("WSS_MUX_PEER_CA_FILE")).map(PathBuf::from),
+            client_cert: non_blank(get("WSS_MUX_PEER_CLIENT_CERT")).map(PathBuf::from),
+            client_key: non_blank(get("WSS_MUX_PEER_CLIENT_KEY")).map(PathBuf::from),
+        };
+
         Ok(Config {
             listen_addr,
             push_auth_token,
@@ -135,6 +238,7 @@ impl Config {
             envelope_payload_path,
             inbound_rate_per_sec,
             inbound_burst,
+            peers,
         })
     }
 }
@@ -142,6 +246,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peers::Scheme;
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
         move |k| {
@@ -289,5 +394,122 @@ mod tests {
         pairs.push(("WSS_MUX_QUEUE_DEPTH", "4096"));
         let cfg = Config::from_getter(env(&pairs)).expect("config");
         assert_eq!(cfg.queue_depth, 4096);
+    }
+
+    #[test]
+    fn peer_config_defaults_when_unset() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        let p = &cfg.peers;
+        assert!(p.relay_enabled);
+        assert_eq!(p.service, "wss-mux-headless");
+        assert_eq!(p.namespace_override, None);
+        assert_eq!(p.cluster_domain, "cluster.local");
+        assert_eq!(p.peer_dns, None);
+        assert!(p.static_peers.is_empty());
+        assert_eq!(p.relay_timeout, Duration::from_millis(500));
+        assert_eq!(p.dns_refresh, Duration::from_secs(3));
+        assert_eq!(p.ca_file, None);
+        assert_eq!(p.client_cert, None);
+        assert_eq!(p.client_key, None);
+    }
+
+    #[test]
+    fn peer_config_overrides_from_env() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEER_SERVICE", "mux-hl"));
+        pairs.push(("WSS_MUX_PEER_NAMESPACE", "team-a"));
+        pairs.push(("WSS_MUX_CLUSTER_DOMAIN", "k8s.internal"));
+        pairs.push(("WSS_MUX_PEER_DNS", "peers.example.svc"));
+        pairs.push(("WSS_MUX_PEERS", "http://a:8080, https://b:9090"));
+        pairs.push(("WSS_MUX_PEER_RELAY_TIMEOUT_MS", "750"));
+        pairs.push(("WSS_MUX_PEER_DNS_REFRESH_SECS", "10"));
+        pairs.push(("WSS_MUX_PEER_CA_FILE", "/etc/ca.pem"));
+        pairs.push(("WSS_MUX_PEER_CLIENT_CERT", "/etc/cert.pem"));
+        pairs.push(("WSS_MUX_PEER_CLIENT_KEY", "/etc/key.pem"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        let p = &cfg.peers;
+        assert_eq!(p.service, "mux-hl");
+        assert_eq!(p.namespace_override.as_deref(), Some("team-a"));
+        assert_eq!(p.cluster_domain, "k8s.internal");
+        assert_eq!(p.peer_dns.as_deref(), Some("peers.example.svc"));
+        assert_eq!(
+            p.static_peers,
+            vec![
+                PeerUrl {
+                    scheme: Scheme::Http,
+                    host: "a".into(),
+                    port: 8080
+                },
+                PeerUrl {
+                    scheme: Scheme::Https,
+                    host: "b".into(),
+                    port: 9090
+                },
+            ]
+        );
+        assert_eq!(p.relay_timeout, Duration::from_millis(750));
+        assert_eq!(p.dns_refresh, Duration::from_secs(10));
+        assert_eq!(
+            p.ca_file.as_deref(),
+            Some(std::path::Path::new("/etc/ca.pem"))
+        );
+        assert_eq!(
+            p.client_cert.as_deref(),
+            Some(std::path::Path::new("/etc/cert.pem"))
+        );
+        assert_eq!(
+            p.client_key.as_deref(),
+            Some(std::path::Path::new("/etc/key.pem"))
+        );
+    }
+
+    #[test]
+    fn peer_relay_off_kill_switch() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEER_RELAY", "off"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert!(!cfg.peers.relay_enabled);
+    }
+
+    #[test]
+    fn peer_relay_non_off_value_stays_enabled() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEER_RELAY", "on"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert!(cfg.peers.relay_enabled);
+    }
+
+    #[test]
+    fn invalid_peers_csv_is_error() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEERS", "a:8080,bad:port"));
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(err, ConfigError::InvalidPeers(_)));
+    }
+
+    #[test]
+    fn invalid_peer_timeout_is_error() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEER_RELAY_TIMEOUT_MS", "soon"));
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_PEER_RELAY_TIMEOUT_MS",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn blank_peer_overrides_fall_back_to_defaults() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PEER_SERVICE", ""));
+        pairs.push(("WSS_MUX_PEER_NAMESPACE", "  "));
+        pairs.push(("WSS_MUX_PEERS", "   "));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.peers.service, "wss-mux-headless");
+        assert_eq!(cfg.peers.namespace_override, None);
+        assert!(cfg.peers.static_peers.is_empty());
     }
 }

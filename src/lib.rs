@@ -5,6 +5,7 @@ pub mod dispatcher;
 pub mod envelope;
 pub mod error;
 pub mod manifest;
+pub mod peers;
 pub mod ratelimit;
 pub mod registry;
 pub mod server;
