@@ -39,10 +39,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 thiserror = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
 assert_matches = "1"
+# Adds the `json` feature on top of the normal-dependency `rustls-tls`
+# for the HTTP integration suite; Cargo unifies features so the
+# production build keeps the minimal `rustls-tls`-only surface.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.21"
 ciborium = "0.2"

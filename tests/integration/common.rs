@@ -33,6 +33,9 @@ pub fn test_config() -> Config {
         // aren't throttled; the rate-limit suite builds its own config.
         inbound_rate_per_sec: 0,
         inbound_burst: 0,
+        // Peer relay defaults are inert in-test (no resolvable peers),
+        // keeping every existing suite byte-identical to single-instance.
+        peers: wss_mux::config::PeerConfig::default(),
     }
 }
 

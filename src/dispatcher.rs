@@ -107,6 +107,7 @@ mod tests {
             envelope_payload_path: "payload".into(),
             inbound_rate_per_sec: 0,
             inbound_burst: 0,
+            peers: crate::config::PeerConfig::default(),
         }
     }
 
