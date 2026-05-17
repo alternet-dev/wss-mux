@@ -9,7 +9,17 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::dispatcher::dispatch;
 use crate::envelope::{EnvelopePaths, EventEnvelope};
+use crate::server::metrics::{RelayFailure, RelayFailureLabel};
 use crate::server::AppState;
+
+/// Where a batch of events entered the process. A producer push is
+/// relayed once to peers; a peer relay receipt is **not** (the distinct
+/// path is the one-hop loop guard).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Producer,
+    Peer,
+}
 
 /// Internal relay body: a batch of already-canonical envelopes,
 /// CBOR-encoded. Independent of the producer-facing `WSS_MUX_ENVELOPE_*`
@@ -42,15 +52,14 @@ fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
 
 /// Shared ingest core for every event entry point. Validates each
 /// envelope's stream against the current manifest (all-or-nothing, per
-/// docs/roadmap.md) then dispatches locally. It deliberately contains
-/// **no** relay logic: the distinct producer (`/v1/events*`) vs.
-/// peer (`/internal/v1/relay`) entry points are the structural one-hop
-/// guard — a relayed event reaches only this function and is never
-/// re-relayed. (Producer-side outbound relay is layered on at the
-/// producer entry points in PR4.)
+/// docs/roadmap.md), dispatches locally, and — only for a producer
+/// origin — spawns a best-effort relay of the canonical batch to the
+/// discovered peers. A peer relay receipt is never re-relayed: the
+/// distinct entry path *is* the structural one-hop loop guard.
 fn accept_events(
     state: &AppState,
     events: Vec<EventEnvelope>,
+    origin: Origin,
 ) -> Result<(), (StatusCode, &'static str)> {
     let manifest = state
         .manifest()
@@ -60,10 +69,88 @@ fn accept_events(
             return Err((StatusCode::NOT_FOUND, "unknown stream"));
         }
     }
+
+    // Capture the canonical batch for relay before the dispatch loop
+    // consumes it (only when this is a producer push).
+    let relay_batch = (origin == Origin::Producer).then(|| RelayBatch {
+        events: events.clone(),
+    });
+
     for envelope in events {
         dispatch(state, envelope);
     }
+
+    if let Some(batch) = relay_batch {
+        spawn_relay(state, batch);
+    }
     Ok(())
+}
+
+/// Fire-and-forget relay of a producer batch to every discovered peer.
+/// Best-effort and never awaited by the request path: backpressure or a
+/// degraded peer must never reach the producer. With no peers it is a
+/// no-op ⇒ byte-identical to a single instance.
+fn spawn_relay(state: &AppState, batch: RelayBatch) {
+    let peers = state.peers();
+    if peers.is_empty() {
+        return;
+    }
+
+    let mut body = Vec::new();
+    if ciborium::into_writer(&batch, &mut body).is_err() {
+        state
+            .metrics()
+            .relay_failed
+            .get_or_create(&RelayFailureLabel {
+                reason: RelayFailure::Other,
+            })
+            .inc();
+        return;
+    }
+
+    let client = state.relay_client().clone();
+    let token = state.config().push_auth_token.clone();
+    let state = state.clone();
+    tokio::spawn(async move {
+        for peer in peers.iter() {
+            let url = format!("{}/internal/v1/relay", peer.base());
+            let result = client
+                .post(&url)
+                .bearer_auth(&token)
+                .header(header::CONTENT_TYPE, "application/cbor")
+                .body(body.clone())
+                .send()
+                .await;
+            match result {
+                Ok(resp) if resp.status().is_success() => {
+                    state.metrics().relay_sent.inc();
+                }
+                Ok(_) => {
+                    state
+                        .metrics()
+                        .relay_failed
+                        .get_or_create(&RelayFailureLabel {
+                            reason: RelayFailure::Status,
+                        })
+                        .inc();
+                }
+                Err(e) => {
+                    let reason = if e.is_timeout() {
+                        RelayFailure::Timeout
+                    } else if e.is_connect() {
+                        RelayFailure::Connect
+                    } else {
+                        RelayFailure::Other
+                    };
+                    state
+                        .metrics()
+                        .relay_failed
+                        .get_or_create(&RelayFailureLabel { reason })
+                        .inc();
+                }
+            }
+        }
+    });
 }
 
 pub async fn push_event(
@@ -77,7 +164,7 @@ pub async fn push_event(
     let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    accept_events(&state, vec![envelope])?;
+    accept_events(&state, vec![envelope], Origin::Producer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -108,7 +195,7 @@ pub async fn push_batch(
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed)?;
+    accept_events(&state, parsed, Origin::Producer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -128,7 +215,7 @@ pub async fn relay_receive(
     let batch: RelayBatch = ciborium::from_reader(body.as_ref())
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR relay body"))?;
 
-    accept_events(&state, batch.events)?;
+    accept_events(&state, batch.events, Origin::Peer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

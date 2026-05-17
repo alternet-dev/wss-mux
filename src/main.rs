@@ -18,16 +18,43 @@ async fn main() -> anyhow::Result<()> {
     let manifest = Manifest::load(&config.manifest_path)?;
     tracing::info!(streams = manifest.streams.len(), "manifest loaded");
 
-    let state = AppState::new(config);
+    let state = AppState::try_new(config)?;
     state.set_manifest(manifest);
 
     spawn_sighup_reloader(state.clone());
+    spawn_peer_refresher(state.clone());
 
     let listener = TcpListener::bind(state.config().listen_addr).await?;
     tracing::info!(addr = %listener.local_addr()?, "wss-mux listening");
 
     axum::serve(listener, build_app(state)).await?;
     Ok(())
+}
+
+/// Keep the peer set fresh. Membership is polled (not per-relay
+/// delivery): re-resolve discovery every `WSS_MUX_PEER_DNS_REFRESH_SECS`
+/// so scale-up/down propagates within a tight window. A static
+/// `WSS_MUX_PEERS` fleet is fixed — set once, never polled. Relay
+/// disabled (`WSS_MUX_PEER_RELAY=off`) ⇒ task not spawned, no DNS query.
+fn spawn_peer_refresher(state: AppState) {
+    let peer_cfg = state.config().peers.clone();
+    if !peer_cfg.relay_enabled {
+        tracing::info!("peer relay disabled (WSS_MUX_PEER_RELAY=off)");
+        return;
+    }
+    let self_port = state.config().listen_addr.port();
+    tokio::spawn(async move {
+        loop {
+            let peers = wss_mux::peers::discover(&peer_cfg, self_port).await;
+            let count = peers.len();
+            state.set_peers(peers);
+            tracing::debug!(peers = count, "peer set refreshed");
+            if !peer_cfg.static_peers.is_empty() {
+                return; // fixed fleet — no polling
+            }
+            tokio::time::sleep(peer_cfg.dns_refresh).await;
+        }
+    });
 }
 
 /// Reload the manifest from disk on every SIGHUP. A failed reload logs and

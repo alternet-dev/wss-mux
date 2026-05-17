@@ -76,6 +76,34 @@ impl EncodeLabelValue for RevokeReason {
     }
 }
 
+#[derive(Clone, Hash, PartialEq, Eq, Debug, EncodeLabelSet)]
+pub struct RelayFailureLabel {
+    pub reason: RelayFailure,
+}
+
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub enum RelayFailure {
+    /// Per-relay request exceeded `WSS_MUX_PEER_RELAY_TIMEOUT_MS`.
+    Timeout,
+    /// Could not establish a connection (refused / unreachable / DNS).
+    Connect,
+    /// Peer answered with a non-success HTTP status.
+    Status,
+    /// Anything else (encode error, body error, ...).
+    Other,
+}
+
+impl EncodeLabelValue for RelayFailure {
+    fn encode(&self, encoder: &mut LabelValueEncoder<'_>) -> Result<(), std::fmt::Error> {
+        encoder.write_str(match self {
+            Self::Timeout => "timeout",
+            Self::Connect => "connect",
+            Self::Status => "status",
+            Self::Other => "other",
+        })
+    }
+}
+
 pub struct Metrics {
     registry: Mutex<Registry>,
     pub connections_total: Counter,
@@ -87,6 +115,9 @@ pub struct Metrics {
     pub manifest_reloads: Family<ReloadResultLabel, Counter>,
     pub subscriptions_revoked: Family<RevokeReasonLabel, Counter>,
     pub frames_rate_limited: Counter,
+    pub relay_sent: Counter,
+    pub relay_failed: Family<RelayFailureLabel, Counter>,
+    pub peers_known: Gauge,
 }
 
 impl Default for Metrics {
@@ -102,6 +133,9 @@ impl Default for Metrics {
         let manifest_reloads = Family::<ReloadResultLabel, Counter>::default();
         let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
         let frames_rate_limited = Counter::default();
+        let relay_sent = Counter::default();
+        let relay_failed = Family::<RelayFailureLabel, Counter>::default();
+        let peers_known = Gauge::default();
 
         registry.register(
             "wss_mux_connections",
@@ -148,6 +182,21 @@ impl Default for Metrics {
             "Inbound client frames rejected by the per-connection rate limit",
             frames_rate_limited.clone(),
         );
+        registry.register(
+            "wss_mux_relay_sent",
+            "Peer-relay deliveries that returned a success status",
+            relay_sent.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_failed",
+            "Peer-relay deliveries that failed, labeled by reason",
+            relay_failed.clone(),
+        );
+        registry.register(
+            "wss_mux_peers_known",
+            "Peers currently in the discovered relay set",
+            peers_known.clone(),
+        );
 
         Self {
             registry: Mutex::new(registry),
@@ -160,6 +209,9 @@ impl Default for Metrics {
             manifest_reloads,
             subscriptions_revoked,
             frames_rate_limited,
+            relay_sent,
+            relay_failed,
+            peers_known,
         }
     }
 }

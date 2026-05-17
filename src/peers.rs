@@ -19,7 +19,7 @@
 //! Resolving nothing yields an empty peer set ⇒ behaviour is
 //! byte-identical to a single instance.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use anyhow::Context;
 use thiserror::Error;
@@ -257,6 +257,73 @@ pub fn build_relay_client(cfg: &PeerConfig) -> anyhow::Result<reqwest::Client> {
     }
 
     builder.build().context("building relay HTTP client")
+}
+
+/// Source IP the OS would select to reach `dst` (UDP-connect trick — no
+/// packets are sent; `connect` on a datagram socket only fixes the peer
+/// and lets the kernel pick a source). When this equals `dst`, `dst` is
+/// one of our own interface addresses: the basis for self-exclusion.
+pub fn os_source_ip(dst: IpAddr) -> Option<IpAddr> {
+    let bind: SocketAddr = if dst.is_ipv4() {
+        (Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (Ipv6Addr::UNSPECIFIED, 0).into()
+    };
+    let sock = std::net::UdpSocket::bind(bind).ok()?;
+    sock.connect(SocketAddr::new(dst, 9)).ok()?;
+    sock.local_addr().ok().map(|a| a.ip())
+}
+
+/// Resolve the live peer set from configuration. Precedence: relay-off
+/// ⇒ none; static list ⇒ as-is (no DNS); explicit `peer_dns` ⇒ resolve;
+/// otherwise compose the conventional headless-Service FQDN from the
+/// resolved namespace and resolve that. DNS-discovered peers are plain
+/// `http` (the in-cluster norm). Self is dropped via `probe`. `read_ns`
+/// and `probe` are injected for testability.
+pub async fn discover_with<R, P>(
+    cfg: &PeerConfig,
+    self_port: u16,
+    read_ns: R,
+    probe: P,
+) -> Vec<PeerUrl>
+where
+    R: FnOnce() -> Option<String>,
+    P: Fn(IpAddr) -> Option<IpAddr>,
+{
+    if !cfg.relay_enabled {
+        return Vec::new();
+    }
+    if !cfg.static_peers.is_empty() {
+        return cfg.static_peers.clone();
+    }
+    let fqdn = match &cfg.peer_dns {
+        Some(dns) => dns.clone(),
+        None => match resolve_namespace(cfg.namespace_override.as_deref(), read_ns) {
+            Some(ns) => compose_fqdn(&cfg.service, &ns, &cfg.cluster_domain),
+            None => return Vec::new(),
+        },
+    };
+    let resolved = resolve_fqdn(&fqdn, self_port).await;
+    exclude_self(resolved, probe)
+        .into_iter()
+        .map(|sa| PeerUrl {
+            scheme: Scheme::Http,
+            host: sa.ip().to_string(),
+            port: sa.port(),
+        })
+        .collect()
+}
+
+/// Production discovery: real ServiceAccount-file namespace read and
+/// real OS source-IP probe.
+pub async fn discover(cfg: &PeerConfig, self_port: u16) -> Vec<PeerUrl> {
+    discover_with(
+        cfg,
+        self_port,
+        || std::fs::read_to_string(SERVICEACCOUNT_NAMESPACE_PATH).ok(),
+        os_source_ip,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -520,5 +587,113 @@ mod tests {
         };
         let err = build_relay_client(&cfg).expect_err("half mTLS must error");
         assert!(err.to_string().contains("must both be set"));
+    }
+
+    // ---- Wave E: source-IP probe + discovery --------------------
+
+    #[test]
+    fn os_source_ip_loopback_is_itself() {
+        // Connecting a UDP socket to loopback makes the kernel select
+        // the loopback address as source ⇒ proves the self-detect basis.
+        let lo: IpAddr = "127.0.0.1".parse().unwrap();
+        assert_eq!(os_source_ip(lo), Some(lo));
+    }
+
+    #[tokio::test]
+    async fn discover_relay_off_is_empty() {
+        let cfg = PeerConfig {
+            relay_enabled: false,
+            static_peers: vec![PeerUrl {
+                scheme: Scheme::Http,
+                host: "a".into(),
+                port: 1,
+            }],
+            ..PeerConfig::default()
+        };
+        let peers = discover_with(
+            &cfg,
+            8080,
+            || panic!("ns read must not happen when relay is off"),
+            |_| panic!("probe must not happen when relay is off"),
+        )
+        .await;
+        assert!(peers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discover_static_peers_bypass_dns() {
+        let statics = vec![
+            PeerUrl {
+                scheme: Scheme::Http,
+                host: "10.0.0.1".into(),
+                port: 8080,
+            },
+            PeerUrl {
+                scheme: Scheme::Https,
+                host: "10.0.0.2".into(),
+                port: 9090,
+            },
+        ];
+        let cfg = PeerConfig {
+            static_peers: statics.clone(),
+            ..PeerConfig::default()
+        };
+        let peers = discover_with(
+            &cfg,
+            8080,
+            || panic!("ns read must not happen for static peers"),
+            |_| panic!("probe must not happen for static peers"),
+        )
+        .await;
+        assert_eq!(peers, statics);
+    }
+
+    #[tokio::test]
+    async fn discover_no_namespace_is_inert() {
+        // No static, no peer_dns, no namespace override, file read fails
+        // ⇒ nothing to compose ⇒ empty (single-instance-equivalent).
+        let cfg = PeerConfig::default();
+        let peers = discover_with(&cfg, 8080, || None, |_| None).await;
+        assert!(peers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discover_peer_dns_resolves_and_excludes_self() {
+        // localhost resolves to loopback; the real probe reports loopback
+        // as self ⇒ every resolved address is excluded ⇒ empty.
+        let cfg = PeerConfig {
+            peer_dns: Some("localhost".into()),
+            ..PeerConfig::default()
+        };
+        let peers = discover_with(
+            &cfg,
+            8080,
+            || panic!("ns read must not happen when peer_dns is set"),
+            os_source_ip,
+        )
+        .await;
+        assert!(peers.is_empty(), "loopback peers must be self-excluded");
+    }
+
+    #[tokio::test]
+    async fn discover_composes_fqdn_from_namespace_and_is_inert_on_nxdomain() {
+        // namespace present ⇒ composed FQDN is resolved. Pin the domain to
+        // the RFC 6761 reserved `.invalid` TLD so the lookup is a fast,
+        // deterministic NXDOMAIN (a real `.cluster.local` name triggers
+        // slow resolver search retries). Empty result proves the compose
+        // path is taken without error.
+        let cfg = PeerConfig {
+            namespace_override: Some("team-a".into()),
+            cluster_domain: "invalid".into(),
+            ..PeerConfig::default()
+        };
+        let peers = discover_with(
+            &cfg,
+            8080,
+            || None,
+            |_| Some("203.0.113.1".parse().unwrap()),
+        )
+        .await;
+        assert!(peers.is_empty());
     }
 }
