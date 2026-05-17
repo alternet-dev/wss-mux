@@ -17,13 +17,21 @@ use wss_mux::server::{build_app, AppState};
 pub const PUSH_TOKEN: &str = "test-push-token";
 pub const SIGNING_KEY: &str = "test-signing-key";
 
+// Deterministic Ed25519 test keypair (PKCS8 / SPKI PEM), matching the
+// pair used by the auth unit tests.
+pub const ED25519_PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINS+Ri6hNJgwRt84yvchqfGNA8ufVJ/7PlEI7O1RQPWe\n-----END PRIVATE KEY-----\n";
+pub const ED25519_PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAGru6jfUFXaDDOSCuIvObd8KSbVpkQb43iORKVTKZuMw=\n-----END PUBLIC KEY-----\n";
+
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub fn test_config() -> Config {
     Config {
         listen_addr: "127.0.0.1:0".parse().unwrap(),
         push_auth_token: PUSH_TOKEN.into(),
-        handshake_signing_key: SIGNING_KEY.into(),
+        handshake_keys: wss_mux::config::HandshakeKeyConfig {
+            hs256_secret: Some(SIGNING_KEY.into()),
+            ed25519_public_pem: None,
+        },
         manifest_path: "test.yaml".into(),
         queue_depth: 1024,
         envelope_stream_path: "stream".into(),
@@ -94,6 +102,28 @@ pub fn sign_token_with_offsets(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(SIGNING_KEY.as_bytes()),
+    )
+    .unwrap()
+}
+
+/// EdDSA-signed handshake token using [`ED25519_PRIV_PEM`], for servers
+/// configured with the matching [`ED25519_PUB_PEM`].
+pub fn sign_token_ed25519(principals: &[&str]) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let claims = Claims {
+        iss: "test".into(),
+        iat: now,
+        exp: now + 300,
+        sub: "user:test".into(),
+        principals: principals.iter().map(|s| (*s).to_string()).collect(),
+    };
+    encode(
+        &Header::new(Algorithm::EdDSA),
+        &claims,
+        &EncodingKey::from_ed_pem(ED25519_PRIV_PEM.as_bytes()).expect("ed25519 priv pem"),
     )
     .unwrap()
 }

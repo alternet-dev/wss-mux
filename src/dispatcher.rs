@@ -158,7 +158,10 @@ mod tests {
         Config {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             push_auth_token: "t".into(),
-            handshake_signing_key: "k".into(),
+            handshake_keys: crate::config::HandshakeKeyConfig {
+                hs256_secret: Some("k".into()),
+                ed25519_public_pem: None,
+            },
             manifest_path: "p".into(),
             queue_depth,
             envelope_stream_path: "stream".into(),

@@ -15,6 +15,7 @@ use axum::Router;
 use dashmap::DashMap;
 use tokio::sync::watch;
 
+use crate::auth::HandshakeVerifier;
 use crate::config::Config;
 use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
@@ -39,6 +40,10 @@ struct Inner {
     peers_tx: watch::Sender<Arc<Vec<PeerUrl>>>,
     // Built once at startup from PeerConfig (timeout + optional TLS).
     relay_client: reqwest::Client,
+    // Built once at startup from the configured handshake key(s); a
+    // bad key fails startup loudly rather than rejecting every
+    // connection at runtime.
+    handshake_verifier: HandshakeVerifier,
     registry: Registry,
     // Per-(connection, subscription) in-flight accounting. The
     // dispatcher reserves a slot before enqueuing; the writer releases
@@ -59,6 +64,10 @@ impl AppState {
     /// than silently degrading.
     pub fn try_new(config: Config) -> anyhow::Result<Self> {
         let relay_client = crate::peers::build_relay_client(&config.peers)?;
+        let handshake_verifier = HandshakeVerifier::new(
+            config.handshake_keys.hs256_secret.as_deref(),
+            config.handshake_keys.ed25519_public_pem.as_deref(),
+        )?;
         let (manifest_tx, _) = watch::channel(None);
         let (peers_tx, _) = watch::channel(Arc::new(Vec::new()));
         Ok(Self {
@@ -67,6 +76,7 @@ impl AppState {
                 manifest_tx,
                 peers_tx,
                 relay_client,
+                handshake_verifier,
                 registry: Registry::new(),
                 sub_queues: SubQueues::new(),
                 connections: DashMap::new(),
@@ -150,6 +160,12 @@ impl AppState {
         &self.inner.sub_queues
     }
 
+    /// The handshake-token verifier built at startup from the
+    /// configured HS256 / Ed25519 key(s).
+    pub fn handshake_verifier(&self) -> &HandshakeVerifier {
+        &self.inner.handshake_verifier
+    }
+
     pub fn next_conn_id(&self) -> ConnId {
         self.inner.next_conn_id.fetch_add(1, Ordering::Relaxed)
     }
@@ -199,7 +215,10 @@ mod tests {
         Config {
             listen_addr: "127.0.0.1:0".parse().unwrap(),
             push_auth_token: "t".into(),
-            handshake_signing_key: "k".into(),
+            handshake_keys: crate::config::HandshakeKeyConfig {
+                hs256_secret: Some("k".into()),
+                ed25519_public_pem: None,
+            },
             manifest_path: "p".into(),
             queue_depth: 8,
             envelope_stream_path: "stream".into(),

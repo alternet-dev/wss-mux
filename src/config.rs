@@ -18,11 +18,24 @@ pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
 pub const DEFAULT_INBOUND_RATE: u32 = 50;
 pub const DEFAULT_INBOUND_BURST: u32 = 100;
 
+/// Handshake-token verification keys. At least one of HS256 / Ed25519
+/// must be configured; both is allowed (the token's `alg` then selects
+/// *which configured key* to verify against — it never widens the set
+/// of accepted algorithms).
+#[derive(Debug, Clone)]
+pub struct HandshakeKeyConfig {
+    /// HS256 shared secret (`WSS_MUX_HANDSHAKE_SIGNING_KEY`).
+    pub hs256_secret: Option<String>,
+    /// Ed25519 public key, PEM. From `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY`
+    /// (inline) or `…_FILE` (path to a PEM file).
+    pub ed25519_public_pem: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub push_auth_token: String,
-    pub handshake_signing_key: String,
+    pub handshake_keys: HandshakeKeyConfig,
     pub manifest_path: PathBuf,
     pub queue_depth: usize,
     /// Dotted path into the push body where the stream name lives.
@@ -98,6 +111,18 @@ impl Default for PeerConfig {
 pub enum ConfigError {
     #[error("missing required env var: {0}")]
     Missing(&'static str),
+    #[error(
+        "at least one handshake key required: set WSS_MUX_HANDSHAKE_SIGNING_KEY \
+         and/or WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY[_FILE]"
+    )]
+    MissingHandshakeKey,
+    #[error("failed to read {var} at `{path}`: {source}")]
+    HandshakeKeyFile {
+        var: &'static str,
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("invalid WSS_MUX_LISTEN_ADDR `{value}`: {source}")]
     InvalidListenAddr {
         value: String,
@@ -142,8 +167,27 @@ impl Config {
         let push_auth_token = get("WSS_MUX_PUSH_AUTH_TOKEN")
             .ok_or(ConfigError::Missing("WSS_MUX_PUSH_AUTH_TOKEN"))?;
 
-        let handshake_signing_key = get("WSS_MUX_HANDSHAKE_SIGNING_KEY")
-            .ok_or(ConfigError::Missing("WSS_MUX_HANDSHAKE_SIGNING_KEY"))?;
+        let hs256_secret = get("WSS_MUX_HANDSHAKE_SIGNING_KEY");
+        let ed25519_public_pem = match get("WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY") {
+            Some(pem) => Some(pem),
+            None => match get("WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE") {
+                Some(path) => Some(std::fs::read_to_string(&path).map_err(|source| {
+                    ConfigError::HandshakeKeyFile {
+                        var: "WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE",
+                        path,
+                        source,
+                    }
+                })?),
+                None => None,
+            },
+        };
+        if hs256_secret.is_none() && ed25519_public_pem.is_none() {
+            return Err(ConfigError::MissingHandshakeKey);
+        }
+        let handshake_keys = HandshakeKeyConfig {
+            hs256_secret,
+            ed25519_public_pem,
+        };
 
         let manifest_path: PathBuf = get("WSS_MUX_STREAMS_MANIFEST_PATH")
             .ok_or(ConfigError::Missing("WSS_MUX_STREAMS_MANIFEST_PATH"))?
@@ -226,7 +270,7 @@ impl Config {
         Ok(Config {
             listen_addr,
             push_auth_token,
-            handshake_signing_key,
+            handshake_keys,
             manifest_path,
             queue_depth,
             envelope_stream_path,
@@ -266,7 +310,11 @@ mod tests {
         assert_eq!(cfg.listen_addr.to_string(), "0.0.0.0:8080");
         assert_eq!(cfg.queue_depth, DEFAULT_QUEUE_DEPTH);
         assert_eq!(cfg.push_auth_token, "push-secret");
-        assert_eq!(cfg.handshake_signing_key, "handshake-secret");
+        assert_eq!(
+            cfg.handshake_keys.hs256_secret.as_deref(),
+            Some("handshake-secret")
+        );
+        assert!(cfg.handshake_keys.ed25519_public_pem.is_none());
         assert_eq!(cfg.manifest_path.to_str(), Some("./streams.yaml"));
         assert_eq!(cfg.envelope_stream_path, "stream");
         assert_eq!(cfg.envelope_key_path, "key");
@@ -327,16 +375,62 @@ mod tests {
     }
 
     #[test]
-    fn missing_handshake_key_is_error() {
+    fn missing_all_handshake_keys_is_error() {
         let pairs = vec![
             ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
             ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
         ];
         let err = Config::from_getter(env(&pairs)).expect_err("error");
-        assert!(matches!(
-            err,
-            ConfigError::Missing("WSS_MUX_HANDSHAKE_SIGNING_KEY")
+        assert!(matches!(err, ConfigError::MissingHandshakeKey));
+    }
+
+    #[test]
+    fn ed25519_only_satisfies_handshake_key_requirement() {
+        // No HS256 secret; an inline Ed25519 PEM alone is sufficient.
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            (
+                "WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY",
+                "-----BEGIN PUBLIC KEY-----\nABC\n-----END PUBLIC KEY-----\n",
+            ),
+        ];
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert!(cfg.handshake_keys.hs256_secret.is_none());
+        assert!(cfg
+            .handshake_keys
+            .ed25519_public_pem
+            .as_deref()
+            .unwrap()
+            .contains("BEGIN PUBLIC KEY"));
+    }
+
+    #[test]
+    fn ed25519_file_is_read_into_pem() {
+        let path = std::env::temp_dir().join(format!(
+            "wss-mux-ed25519-{}-{}.pem",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("t")
         ));
+        std::fs::write(
+            &path,
+            "-----BEGIN PUBLIC KEY-----\nFROMFILE\n-----END PUBLIC KEY-----\n",
+        )
+        .expect("write key");
+        let p = path.to_string_lossy().to_string();
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE", p.as_str()),
+        ];
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert!(cfg
+            .handshake_keys
+            .ed25519_public_pem
+            .as_deref()
+            .unwrap()
+            .contains("FROMFILE"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
