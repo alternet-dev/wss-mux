@@ -22,6 +22,12 @@ pub struct Stream {
     /// rejects the whole batch.
     #[serde(default)]
     pub max_payload_bytes: Option<u64>,
+    /// Optional per-stream send-queue depth override. Absent ⇒ the
+    /// global `WSS_MUX_QUEUE_DEPTH`. This is the max in-flight frames
+    /// for a single subscription on this stream before that
+    /// subscription overflows (and is dropped on its own).
+    #[serde(default)]
+    pub queue_depth: Option<usize>,
 }
 
 #[derive(Debug, Error)]
@@ -50,6 +56,8 @@ pub enum ManifestError {
     InvalidWildcard { stream: String, entry: String },
     #[error("stream `{0}` has max_payload_bytes: 0, which rejects every event")]
     ZeroMaxPayload(String),
+    #[error("stream `{0}` has queue_depth: 0, which drops every event")]
+    ZeroQueueDepth(String),
 }
 
 impl Manifest {
@@ -97,6 +105,11 @@ impl Manifest {
                 // certainly a misconfiguration. Fail fast rather than
                 // silently black-hole the stream.
                 return Err(ManifestError::ZeroMaxPayload(stream.name.clone()));
+            }
+            if stream.queue_depth == Some(0) {
+                // A 0 cap drops every event for every subscription on
+                // the stream — almost certainly a misconfiguration.
+                return Err(ManifestError::ZeroQueueDepth(stream.name.clone()));
             }
             if !seen.insert(stream.name.as_str()) {
                 return Err(ManifestError::DuplicateStream(stream.name.clone()));
@@ -265,6 +278,38 @@ streams:
         let err = Manifest::from_str(s, p()).expect_err("error");
         match err {
             ManifestError::ZeroMaxPayload(name) => assert_eq!(name, "chat_messages"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_optional_queue_depth() {
+        let s = r#"
+version: 1
+streams:
+  - stream: bursty
+    audience: [role:member]
+    queue_depth: 64
+  - stream: defaulted
+    audience: [role:member]
+"#;
+        let m = Manifest::from_str(s, p()).expect("manifest");
+        assert_eq!(m.stream("bursty").unwrap().queue_depth, Some(64));
+        assert_eq!(m.stream("defaulted").unwrap().queue_depth, None);
+    }
+
+    #[test]
+    fn rejects_zero_queue_depth() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:member]
+    queue_depth: 0
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        match err {
+            ManifestError::ZeroQueueDepth(name) => assert_eq!(name, "chat_messages"),
             other => panic!("unexpected error: {other:?}"),
         }
     }

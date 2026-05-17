@@ -20,6 +20,7 @@ use crate::connection::{ConnId, Outbound};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
 use crate::registry::Registry;
+use crate::subqueue::SubQueues;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -39,6 +40,11 @@ struct Inner {
     // Built once at startup from PeerConfig (timeout + optional TLS).
     relay_client: reqwest::Client,
     registry: Registry,
+    // Per-(connection, subscription) in-flight accounting. The
+    // dispatcher reserves a slot before enqueuing; the writer releases
+    // once written. Wired here in PR1; the dispatch/overflow path
+    // starts using it in the per-subscription-overflow PR.
+    sub_queues: SubQueues,
     connections: DashMap<ConnId, ConnectionHandle>,
     next_conn_id: AtomicU64,
     metrics: Metrics,
@@ -68,6 +74,7 @@ impl AppState {
                 peers_tx,
                 relay_client,
                 registry: Registry::new(),
+                sub_queues: SubQueues::new(),
                 connections: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
                 metrics: Metrics::default(),
@@ -142,6 +149,11 @@ impl AppState {
 
     pub fn registry(&self) -> &Registry {
         &self.inner.registry
+    }
+
+    /// Shared per-subscription in-flight accounting.
+    pub fn sub_queues(&self) -> &SubQueues {
+        &self.inner.sub_queues
     }
 
     pub fn next_conn_id(&self) -> ConnId {
@@ -226,6 +238,14 @@ mod tests {
 
     fn manifest(yaml: &str) -> Manifest {
         Manifest::from_str(yaml, Path::new("test.yaml")).expect("valid manifest")
+    }
+
+    #[test]
+    fn app_state_exposes_shared_sub_queues() {
+        let state = AppState::new(cfg());
+        assert!(state.sub_queues().try_reserve(1, "s1", 1));
+        assert!(!state.sub_queues().try_reserve(1, "s1", 1));
+        assert_eq!(state.sub_queues().in_flight(1, "s1"), 1);
     }
 
     #[test]
