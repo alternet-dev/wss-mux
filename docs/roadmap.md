@@ -86,7 +86,8 @@ Out of scope:
 - Bidirectional command transport.
 - Built-in message broker.
 - Domain payload processing.
-- Cross-instance state replication beyond the optional pubsub fanout.
+- Cross-instance state replication beyond the optional peer-relay
+  event fanout.
 - TLS termination.
 - Token issuance.
 
@@ -97,9 +98,15 @@ Out of scope:
   schema returns 400, an unknown stream in any event returns 404, and
   on success a single 204 with no per-event detail. Per-event status
   may be reconsidered if observability needs grow.
-- Should the manifest support stream wildcards (`chat_*`) for
-  audience grants?
-- Should there be a per-stream max-payload-size to prevent pathological
-  fanout amplification?
+- ~~Should the manifest support stream wildcards (`chat_*`) for
+  audience grants?~~ Resolved in v0.3: an audience entry may end with a
+  single trailing `*` (prefix match); a bare `*` admits any
+  authenticated connection. A `*` anywhere but the final position is
+  rejected at manifest load. See `docs/embedding.md`.
+- ~~Should there be a per-stream max-payload-size to prevent
+  pathological fanout amplification?~~ Resolved in v0.3: optional
+  `max_payload_bytes` per stream, measured as JSON-serialized payload
+  length, enforced on push/batch/relay (413, all-or-nothing). See
+  `docs/embedding.md`.
 
 These are tracked as GitHub issues once the project is initialized.
