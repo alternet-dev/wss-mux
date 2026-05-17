@@ -37,6 +37,10 @@ pub enum ManifestError {
     EmptyAudience(String),
     #[error("duplicate stream name `{0}`")]
     DuplicateStream(String),
+    #[error(
+        "stream `{stream}` audience entry `{entry}` may only use `*` as a single trailing wildcard"
+    )]
+    InvalidWildcard { stream: String, entry: String },
 }
 
 impl Manifest {
@@ -66,6 +70,18 @@ impl Manifest {
         for stream in &self.streams {
             if stream.audience.is_empty() {
                 return Err(ManifestError::EmptyAudience(stream.name.clone()));
+            }
+            for entry in &stream.audience {
+                // A `*` is only meaningful as a single trailing
+                // wildcard (or the bare `*`). Reject any other use so
+                // the prefix-match semantics stay unambiguous.
+                let stars = entry.matches('*').count();
+                if stars > 1 || (stars == 1 && !entry.ends_with('*')) {
+                    return Err(ManifestError::InvalidWildcard {
+                        stream: stream.name.clone(),
+                        entry: entry.clone(),
+                    });
+                }
             }
             if !seen.insert(stream.name.as_str()) {
                 return Err(ManifestError::DuplicateStream(stream.name.clone()));
@@ -144,6 +160,66 @@ streams:
             ManifestError::DuplicateStream(name) => assert_eq!(name, "chat_messages"),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn accepts_trailing_and_bare_wildcards() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [role:*]
+  - stream: public_feed
+    audience: ["*"]
+  - stream: tenant_events
+    audience: [tenant:*, role:operator]
+"#;
+        let m = Manifest::from_str(s, p()).expect("manifest");
+        assert_eq!(m.streams.len(), 3);
+        assert_eq!(m.streams[0].audience, vec!["role:*".to_string()]);
+        assert_eq!(m.streams[1].audience, vec!["*".to_string()]);
+    }
+
+    #[test]
+    fn rejects_wildcard_not_in_final_position() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: [ro*le]
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        match err {
+            ManifestError::InvalidWildcard { stream, entry } => {
+                assert_eq!(stream, "chat_messages");
+                assert_eq!(entry, "ro*le");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_leading_wildcard() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: ["*member"]
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        assert!(matches!(err, ManifestError::InvalidWildcard { .. }));
+    }
+
+    #[test]
+    fn rejects_multiple_wildcards() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    audience: ["a*b*"]
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        assert!(matches!(err, ManifestError::InvalidWildcard { .. }));
     }
 
     #[test]
