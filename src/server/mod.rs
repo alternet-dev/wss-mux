@@ -148,6 +148,7 @@ pub fn build_app(state: AppState) -> Router {
         .route("/metrics", get(http::metrics))
         .route("/v1/events", post(http::push_event))
         .route("/v1/events/batch", post(http::push_batch))
+        .route("/internal/v1/relay", post(http::relay_receive))
         .route("/v1/stream", get(ws::ws_handler))
         .with_state(state)
 }
