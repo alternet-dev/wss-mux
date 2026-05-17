@@ -136,6 +136,17 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | dotted path to the payload |
 | `WSS_MUX_INBOUND_RATE` | `50` | inbound client-frame rate (frames/sec/conn); `0` disables |
 | `WSS_MUX_INBOUND_BURST` | `100` | inbound token-bucket capacity (burst) |
+| `WSS_MUX_PEER_RELAY` | (on) | `off` disables cross-instance relay + discovery |
+| `WSS_MUX_PEER_SERVICE` | `wss-mux-headless` | headless Service name for the composed discovery FQDN |
+| `WSS_MUX_PEER_NAMESPACE` | (auto) | namespace override; else auto-read from the ServiceAccount |
+| `WSS_MUX_CLUSTER_DOMAIN` | `cluster.local` | cluster DNS domain |
+| `WSS_MUX_PEER_DNS` | — | full peer FQDN override (skips composition) |
+| `WSS_MUX_PEERS` | — | static peer CSV for a fixed fleet (no DNS) |
+| `WSS_MUX_PEER_DNS_REFRESH_SECS` | `3` | peer re-resolution interval |
+| `WSS_MUX_PEER_RELAY_TIMEOUT_MS` | `500` | per-relay request timeout |
+| `WSS_MUX_PEER_CA_FILE` | — | private CA to trust for `https://` peers |
+| `WSS_MUX_PEER_CLIENT_CERT` | — | client certificate for peer mutual TLS |
+| `WSS_MUX_PEER_CLIENT_KEY` | — | client key for peer mutual TLS |
 
 Operational notes:
 
@@ -147,9 +158,15 @@ Operational notes:
   subprotocol for CBOR instead of JSON; frame shapes are identical.
 - **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
   `/healthz` and `/readyz` are the liveness/readiness probes.
+- **Peer-relay.** Run >1 instance and a producer push is relayed once
+  to discovered peers so every subscriber sees it, with zero new
+  infrastructure. Active by default, inert with no resolvable peers
+  (byte-identical to single-instance). The conventional Kubernetes
+  deploy needs no peer configuration at all.
 
 The envelope-path and rate-limit knobs are detailed in
-[docs/embedding.md](docs/embedding.md).
+[docs/embedding.md](docs/embedding.md); running multiple instances is
+covered end-to-end in [docs/operations.md](docs/operations.md).
 
 ## Reading order
 
@@ -157,7 +174,8 @@ The envelope-path and rate-limit knobs are detailed in
 2. [docs/protocol.md](docs/protocol.md) — wire format
 3. [docs/embedding.md](docs/embedding.md) — how to integrate
 4. [docs/architecture.md](docs/architecture.md) — implementation shape
-5. [docs/roadmap.md](docs/roadmap.md) — what's in each version
+5. [docs/operations.md](docs/operations.md) — running it (incl. multi-instance)
+6. [docs/roadmap.md](docs/roadmap.md) — what's in each version
 
 LLM agents: start with [AGENTS.md](AGENTS.md).
 

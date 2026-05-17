@@ -9,7 +9,8 @@ for server-driven event fanout. Clients connect via WebSocket, present
 a signed token, and subscribe to named streams. A producer pushes
 events to `wss-mux` via HTTP, and `wss-mux` routes each event to all
 matching subscriptions across all connected clients. At-most-once,
-ephemeral, no broker, no database, no required dependencies.
+ephemeral, no broker, no database, no external infrastructure
+required.
 
 ## Reading order
 
@@ -18,9 +19,10 @@ ephemeral, no broker, no database, no required dependencies.
 3. [docs/protocol.md](docs/protocol.md) — wire format + state machine
 4. [docs/architecture.md](docs/architecture.md) — implementation shape
 5. [docs/embedding.md](docs/embedding.md) — integration patterns
-6. [docs/roadmap.md](docs/roadmap.md) — versioned plan
-7. Source: `src/main.rs` → `src/server/` → `src/registry.rs` +
-   `src/dispatcher.rs`
+6. [docs/operations.md](docs/operations.md) — running it (multi-instance)
+7. [docs/roadmap.md](docs/roadmap.md) — versioned plan
+8. Source: `src/main.rs` → `src/server/` → `src/registry.rs` +
+   `src/dispatcher.rs` → `src/peers/` (cross-instance relay)
 
 ## Key invariants
 
@@ -34,18 +36,29 @@ ephemeral, no broker, no database, no required dependencies.
   subscription-level (audience check).
 - Overflow → close, not block. Backpressure never reaches the
   producer.
-- Default build has zero non-Rust dependencies.
+- The default build's only non-Rust code is `ring` (C + assembly),
+  pulled transitively for crypto: `jsonwebtoken` (token validation,
+  since v0.1) and `rustls` (peer-relay TLS client, since v0.3). That
+  is why the Docker runtime stage is `distroless/cc`. New code must
+  not add a *different* native-dependency class — keep crypto on the
+  existing `ring` baseline.
 
 ## What NOT to do
 
-- **No infrastructure assumptions in the binary.** No
-  Kubernetes-specific, Caddy-specific, or vendor-specific code.
-  Patterns belong in `docs/embedding.md`, not in `src/`.
+- **No hard infrastructure coupling in the binary.** No vendor SDKs,
+  no Kubernetes/cloud API clients, no broker libraries. Generic,
+  overridable conventions are allowed (peer discovery composes a
+  DNS-conventional name and reads the ServiceAccount namespace file,
+  but is plain DNS, runtime-config-gated, inert without peers, and has
+  full non-k8s escape hatches). Deployment-specific patterns belong in
+  `docs/operations.md` / `docs/embedding.md`, not hard-coded in `src/`.
 - **No silent contract changes.** Wire frame additions, manifest
   schema changes, and token-claim changes go through `docs/protocol.md`
   + roadmap update.
-- **No native library deps in the default build.** Optional features
-  may pull native libs but must be off by default.
+- **No new external-infrastructure dependency.** No broker, database,
+  or other service the operator must run. This is the hard line that
+  rejected the Redis adapter; peer-relay rides the existing HTTP stack
+  + cluster DNS precisely to preserve it.
 - **No features that contradict the at-most-once / ephemeral
   contract** without an explicit version bump and roadmap entry.
 

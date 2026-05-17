@@ -136,10 +136,18 @@ occupancy is near zero outside fanout bursts.
 ## What's NOT in the binary
 
 - **Storage.** No database, no embedded KV.
-- **Service discovery.** No peer awareness; instances are independent.
+- **Replicated state.** Instances share no subscription/connection
+  state. The one cross-instance mechanism is peer-relay (v0.3): an
+  instance relays a producer push once to its DNS-discovered peers so
+  each fans out to its own clients — best-effort, one-hop, no gossip,
+  no shared state. Resolving no peers ⇒ inert (single-instance
+  behaviour). See `docs/operations.md`.
 - **Token issuance.** Only validation.
 - **Producer adapters.** No Kafka consumer, no Redis subscriber.
-- **TLS termination.** Done at the reverse proxy.
+- **TLS termination.** Client-edge TLS is done at the reverse proxy
+  (peer-to-peer TLS is a separate, optional axis — see operations).
 
-Any of these can be added as Cargo features in later versions if a
-specific deployment needs them. The default build is dependency-free.
+The default build links one piece of non-Rust code: `ring` (C +
+assembly), pulled transitively for crypto (`jsonwebtoken` token
+validation since v0.1; `rustls` peer-TLS since v0.3). It needs no
+external service to run.
