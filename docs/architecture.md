@@ -41,11 +41,14 @@ Also serves `/healthz` (200 if the process is alive) and `/readyz`
 
 Receives validated events from the HTTP server. For each event, looks
 up the set of subscriptions matching the event's `stream` (and `key`,
-if narrowed) in the registry. Enqueues a copy of the event on each
-matching connection's send queue.
+if narrowed) in the registry. For each match it reserves an in-flight
+slot against that subscription's send-queue cap (the stream's manifest
+`queue_depth`, else the global default), then enqueues a copy of the
+event on the connection's shared send queue.
 
-The dispatcher does not block on slow consumers — overflow is the
-connection's problem.
+The dispatcher does not block on slow consumers. A subscription that
+cannot reserve a slot has overflowed and is dropped on its own — the
+connection and its other subscriptions are unaffected.
 
 ### Registry
 
@@ -68,8 +71,9 @@ Accepts WebSocket connections at `/v1/stream`. For each connection:
 - A bounded send queue holds outgoing frames (default 1024).
 - A second task drains the queue to the socket.
 
-When the queue fills, the server sends a final `error` frame with
-`code: overflow` and closes the connection.
+When a subscription exceeds its send-queue depth, the server sends an
+`error` frame with `code: overflow` (carrying that subscription's
+`id`) and drops only that subscription; the connection stays open.
 
 ### Auth
 
@@ -123,7 +127,11 @@ per-connection ones and any optional metric pushers.
 
 Per connection: `queue_depth × avg_frame_size` bytes (default
 1024 × ~1KB ≈ 1MB ceiling). Closed connections release memory
-immediately.
+immediately. Setting `WSS_MUX_QUEUE_DEPTH=0` (explicit "unlimited")
+removes this ceiling — the per-connection channel becomes unbounded,
+so a stalled or non-reading client can grow memory without limit.
+That is an opt-in tradeoff for deployments that must never drop
+events and trust their consumers to keep up.
 
 Per stream: O(active subscriptions). Each subscription is a small
 struct (≈64 bytes).

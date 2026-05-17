@@ -111,11 +111,11 @@ otherwise.
 | `unauthorized_subscribe` | principals do not intersect stream audience | no |
 | `duplicate_subscription_id` | subscribe with an `id` already in use | no |
 | `rate_limited` | inbound frame rate limit exceeded | no |
-| `overflow` | per-connection send queue overflowed | yes |
+| `overflow` | a subscription exceeded its send-queue depth | no |
 
 Errors that close the connection use WebSocket close code `4xxx`
 matching the error semantically (`4400` bad frame, `4401`
-unauthenticated, `4429` overflow).
+unauthenticated).
 
 `rate_limited` is keep-open: the offending frame is dropped (not
 processed), an `error` frame is returned (echoing the frame's `id`
@@ -123,6 +123,25 @@ when it has one), and the connection stays usable. The limiter is a
 per-connection token bucket; see `WSS_MUX_INBOUND_RATE` /
 `WSS_MUX_INBOUND_BURST` in `docs/embedding.md`. Rate limiting is off
 when `WSS_MUX_INBOUND_RATE` is `0`.
+
+`overflow` is keep-open and **per-subscription**. Each subscription
+has an in-flight send-queue cap: the stream's manifest `queue_depth`
+if set, otherwise the global `WSS_MUX_QUEUE_DEPTH` default. When a
+subscription exceeds its cap (a consumer too slow for that stream's
+event rate), only that subscription is dropped — an `error` frame
+with `code: "overflow"` and the subscription's `id` is sent, the
+subscription is removed server-side, and the connection and its other
+subscriptions continue. A client that still wants the stream simply
+`subscribe`s again. Before v0.4 a single slow subscription closed the
+whole connection with WebSocket code `4429`; that connection-level
+overflow close no longer exists.
+
+A `queue_depth` of `0` at either scope means **unlimited** (explicit
+opt-in): that subscription is never overflow-dropped for depth. A
+global `WSS_MUX_QUEUE_DEPTH=0` makes the per-connection buffer
+unbounded — no `overflow` is ever emitted, at the cost of the
+per-connection memory bound (a stalled client can OOM the instance).
+See `docs/embedding.md`.
 
 ## Connection lifecycle
 
@@ -140,7 +159,7 @@ when `WSS_MUX_INBOUND_RATE` is `0`.
              v                                  |
       [authenticated, N subs] -----------------+
              |
-             | overflow / token expiry / client close / shutdown
+             | token expiry / client close / shutdown
              v
           [closed]
 ```

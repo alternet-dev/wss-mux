@@ -1,8 +1,11 @@
 use crate::connection::Outbound;
 use crate::envelope::ServerFrame;
 
-/// One variant per row of the error code table in `docs/protocol.md`,
-/// excluding `overflow` (handled in PR5).
+/// One variant per row of the error code table in `docs/protocol.md`.
+///
+/// `Overflow` is keep-open and per-subscription (v0.4): the offending
+/// subscription is dropped, the connection and its other subscriptions
+/// survive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
     UnknownFrameType,
@@ -13,6 +16,7 @@ pub enum ProtocolError {
     UnauthorizedSubscribe { id: String },
     DuplicateSubscriptionId { id: String },
     RateLimited { id: Option<String> },
+    Overflow { id: String },
 }
 
 impl ProtocolError {
@@ -26,6 +30,7 @@ impl ProtocolError {
             Self::UnauthorizedSubscribe { .. } => "unauthorized_subscribe",
             Self::DuplicateSubscriptionId { .. } => "duplicate_subscription_id",
             Self::RateLimited { .. } => "rate_limited",
+            Self::Overflow { .. } => "overflow",
         }
     }
 
@@ -39,6 +44,7 @@ impl ProtocolError {
             Self::UnauthorizedSubscribe { .. } => "principals do not intersect stream audience",
             Self::DuplicateSubscriptionId { .. } => "subscription id already in use",
             Self::RateLimited { .. } => "inbound frame rate limit exceeded",
+            Self::Overflow { .. } => "per-subscription send queue overflowed",
         }
     }
 
@@ -50,7 +56,8 @@ impl ProtocolError {
             Self::Unauthenticated { id } | Self::RateLimited { id } => id.as_deref(),
             Self::UnknownStream { id }
             | Self::UnauthorizedSubscribe { id }
-            | Self::DuplicateSubscriptionId { id } => Some(id),
+            | Self::DuplicateSubscriptionId { id }
+            | Self::Overflow { id } => Some(id),
             _ => None,
         }
     }
@@ -132,6 +139,25 @@ mod tests {
             unreachable!()
         };
         assert_eq!(id.as_deref(), Some("s9"));
+    }
+
+    #[test]
+    fn overflow_is_keep_open_and_echoes_sub_id() {
+        // v0.4: overflow is per-subscription and keep-open — the
+        // offending subscription is dropped, the connection survives.
+        let err = ProtocolError::Overflow { id: "s1".into() };
+        assert_eq!(err.code(), "overflow");
+        assert_eq!(
+            err.close_code(),
+            None,
+            "overflow no longer closes the connection"
+        );
+        assert_eq!(err.id(), Some("s1"));
+        assert!(matches!(err.to_outbound(), Outbound::Frame(_)));
+        let ServerFrame::Error { id, .. } = err.to_frame() else {
+            unreachable!()
+        };
+        assert_eq!(id.as_deref(), Some("s1"));
     }
 
     #[test]

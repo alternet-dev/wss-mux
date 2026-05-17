@@ -56,8 +56,6 @@ pub enum ManifestError {
     InvalidWildcard { stream: String, entry: String },
     #[error("stream `{0}` has max_payload_bytes: 0, which rejects every event")]
     ZeroMaxPayload(String),
-    #[error("stream `{0}` has queue_depth: 0, which drops every event")]
-    ZeroQueueDepth(String),
 }
 
 impl Manifest {
@@ -105,11 +103,6 @@ impl Manifest {
                 // certainly a misconfiguration. Fail fast rather than
                 // silently black-hole the stream.
                 return Err(ManifestError::ZeroMaxPayload(stream.name.clone()));
-            }
-            if stream.queue_depth == Some(0) {
-                // A 0 cap drops every event for every subscription on
-                // the stream — almost certainly a misconfiguration.
-                return Err(ManifestError::ZeroQueueDepth(stream.name.clone()));
             }
             if !seen.insert(stream.name.as_str()) {
                 return Err(ManifestError::DuplicateStream(stream.name.clone()));
@@ -299,7 +292,10 @@ streams:
     }
 
     #[test]
-    fn rejects_zero_queue_depth() {
+    fn zero_queue_depth_means_unlimited() {
+        // `0` is the explicit "unlimited" signal for the stream (the
+        // dispatcher skips the per-subscription cap); it parses rather
+        // than being rejected at load.
         let s = r#"
 version: 1
 streams:
@@ -307,11 +303,8 @@ streams:
     audience: [role:member]
     queue_depth: 0
 "#;
-        let err = Manifest::from_str(s, p()).expect_err("error");
-        match err {
-            ManifestError::ZeroQueueDepth(name) => assert_eq!(name, "chat_messages"),
-            other => panic!("unexpected error: {other:?}"),
-        }
+        let m = Manifest::from_str(s, p()).expect("valid manifest");
+        assert_eq!(m.stream("chat_messages").unwrap().queue_depth, Some(0));
     }
 
     // `queue_depth`/`max_payload_bytes` are unsigned (`usize`/`u64`), so

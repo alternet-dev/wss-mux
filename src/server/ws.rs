@@ -10,10 +10,10 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 
 use crate::auth::{audience_admits, validate_token, AuthError};
-use crate::connection::{ConnId, Outbound};
+use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx, OutboundTx};
 use crate::envelope::{ClientFrame, ServerFrame};
 use crate::error::ProtocolError;
 use crate::manifest::Manifest;
@@ -84,9 +84,8 @@ fn encode_frame(codec: Codec, frame: &ServerFrame) -> Option<Message> {
 
 async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
     let conn_id = state.next_conn_id();
-    let (data_tx, data_rx) = mpsc::channel::<Outbound>(state.config().queue_depth);
-    let (abort_tx, abort_rx) = watch::channel(false);
-    state.register_connection(conn_id, data_tx.clone(), abort_tx);
+    let (data_tx, data_rx) = outbound_channel(state.config().queue_depth);
+    state.register_connection(conn_id, data_tx.clone());
 
     state.metrics().connections_total.inc();
     state.metrics().connections_active.inc();
@@ -94,18 +93,9 @@ async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
     let manifest_rx = state.subscribe_manifest();
 
     let (writer, reader) = socket.split();
-    let writer_task = tokio::spawn(writer_loop(writer, data_rx, abort_rx.clone(), codec));
+    let writer_task = tokio::spawn(writer_loop(writer, data_rx, codec, conn_id, state.clone()));
 
-    reader_loop(
-        reader,
-        conn_id,
-        &state,
-        data_tx,
-        abort_rx,
-        manifest_rx,
-        codec,
-    )
-    .await;
+    reader_loop(reader, conn_id, &state, data_tx, manifest_rx, codec).await;
 
     state.unregister_connection(conn_id);
     state.metrics().connections_active.dec();
@@ -114,70 +104,52 @@ async fn handle_socket(socket: WebSocket, state: AppState, codec: Codec) {
 
 async fn writer_loop(
     mut writer: SplitSink<WebSocket, Message>,
-    mut rx: mpsc::Receiver<Outbound>,
-    mut abort_rx: watch::Receiver<bool>,
+    mut rx: OutboundRx,
     codec: Codec,
+    conn_id: ConnId,
+    state: AppState,
 ) {
-    // Mark the initial `false` as seen so changed() only fires on a real
-    // transition. Without this, changed() returns Ready immediately the
-    // first time it's polled.
-    abort_rx.borrow_and_update();
-    // Disable the abort branch once it can no longer signal — either the
-    // sender dropped or we observed a non-true value. Otherwise the biased
-    // select would keep starving the data channel.
-    let mut abort_active = true;
-    loop {
-        tokio::select! {
-            biased;
-            res = abort_rx.changed(), if abort_active => {
-                if res.is_ok() && *abort_rx.borrow() {
-                    emit_overflow_close(&mut writer, codec).await;
-                    return;
-                }
-                abort_active = false;
-            }
-            msg = rx.recv() => {
-                match msg {
-                    Some(Outbound::Frame(frame)) => {
-                        let Some(msg) = encode_frame(codec, &frame) else {
-                            continue;
-                        };
-                        if writer.send(msg).await.is_err() {
-                            return;
-                        }
-                    }
-                    Some(Outbound::Close { code, reason, frame }) => {
-                        if let Some(frame) = frame {
-                            if let Some(msg) = encode_frame(codec, &frame) {
-                                let _ = writer.send(msg).await;
-                            }
-                        }
-                        let close = CloseFrame { code, reason: Cow::Owned(reason) };
-                        let _ = writer.send(Message::Close(Some(close))).await;
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            Outbound::Frame(frame) => {
+                // An Event frame consumed a per-subscription slot the
+                // dispatcher reserved before enqueuing it.
+                let sub_id = match &frame {
+                    ServerFrame::Event { id, .. } => Some(id.clone()),
+                    _ => None,
+                };
+                if let Some(msg) = encode_frame(codec, &frame) {
+                    if writer.send(msg).await.is_err() {
                         return;
                     }
-                    None => break,
                 }
+                // The frame has left the shared channel; free the
+                // reserved slot so the subscription can receive more
+                // (release on an absent count is a no-op).
+                if let Some(id) = sub_id {
+                    state.sub_queues().release(conn_id, &id);
+                }
+            }
+            Outbound::Close {
+                code,
+                reason,
+                frame,
+            } => {
+                if let Some(frame) = frame {
+                    if let Some(msg) = encode_frame(codec, &frame) {
+                        let _ = writer.send(msg).await;
+                    }
+                }
+                let close = CloseFrame {
+                    code,
+                    reason: Cow::Owned(reason),
+                };
+                let _ = writer.send(Message::Close(Some(close))).await;
+                return;
             }
         }
     }
     let _ = writer.send(Message::Close(None)).await;
-}
-
-async fn emit_overflow_close(writer: &mut SplitSink<WebSocket, Message>, codec: Codec) {
-    let err = ServerFrame::Error {
-        code: "overflow".into(),
-        message: "per-connection send queue overflowed".into(),
-        id: None,
-    };
-    if let Some(msg) = encode_frame(codec, &err) {
-        let _ = writer.send(msg).await;
-    }
-    let close = CloseFrame {
-        code: 4429,
-        reason: Cow::Borrowed("overflow"),
-    };
-    let _ = writer.send(Message::Close(Some(close))).await;
 }
 
 /// Two-stage JSON parse: any read failure is `bad_frame`; a parsed body
@@ -247,23 +219,19 @@ async fn reader_loop(
     mut reader: SplitStream<WebSocket>,
     conn_id: ConnId,
     state: &AppState,
-    tx: mpsc::Sender<Outbound>,
-    mut abort_rx: watch::Receiver<bool>,
+    tx: OutboundTx,
     mut manifest_rx: watch::Receiver<Option<Arc<Manifest>>>,
     codec: Codec,
 ) {
     let mut principals: Option<Vec<String>> = None;
     let mut subs: HashMap<String, (String, Option<String>)> = HashMap::new();
     let mut explicit_close = false;
-    let mut aborted = false;
 
     // Per-connection inbound limiter. `rate == 0` disables it entirely.
     let cfg = state.config();
     let mut rate_limiter = (cfg.inbound_rate_per_sec > 0)
         .then(|| TokenBucket::new(cfg.inbound_burst, cfg.inbound_rate_per_sec, Instant::now()));
 
-    abort_rx.borrow_and_update();
-    let mut abort_active = true;
     // Mark the current manifest as seen so changed() only fires on a real
     // SIGHUP swap, not the value already in place when this task starts.
     manifest_rx.borrow_and_update();
@@ -271,14 +239,6 @@ async fn reader_loop(
     loop {
         let msg = tokio::select! {
             biased;
-            res = abort_rx.changed(), if abort_active => {
-                if res.is_ok() && *abort_rx.borrow() {
-                    aborted = true;
-                    break;
-                }
-                abort_active = false;
-                continue;
-            }
             res = manifest_rx.changed(), if manifest_active => {
                 if res.is_err() {
                     manifest_active = false;
@@ -427,9 +387,10 @@ async fn reader_loop(
         state.metrics().subscriptions_active.dec();
     }
 
-    // If we exited via the abort path, the writer is already taking care of
-    // the overflow error + close 4429; don't queue a competing normal_close.
-    if !explicit_close && !aborted {
+    // A typed close (e.g. a 4400/4401 error) was already queued via
+    // `explicit_close`; otherwise signal a normal close so the writer
+    // exits on an explicit signal rather than channel-drop alone.
+    if !explicit_close {
         let _ = tx.try_send(Outbound::normal_close());
     }
 }
