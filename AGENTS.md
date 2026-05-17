@@ -26,8 +26,10 @@ ephemeral, no broker, no database, no required dependencies.
 
 - `wss-mux` does NOT mint tokens. Only validates.
 - `wss-mux` does NOT persist subscriptions or events.
-- `wss-mux` does NOT broadcast to peer instances. Multi-instance
-  fanout is the producer's job.
+- `wss-mux` does NOT replicate subscription state across instances.
+  It performs one-hop, best-effort event relay to discovered peers:
+  never gossips state, never multi-hops. Resolving no peers ⇒ no
+  relay (byte-identical to single-instance).
 - Authentication is two-stage: connection-level (auth frame) and
   subscription-level (audience check).
 - Overflow → close, not block. Backpressure never reaches the
