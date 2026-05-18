@@ -254,19 +254,27 @@ streams:
   The client can `subscribe` again to resume. A slow consumer on one
   stream no longer tears down the whole connection.
 - Absent ⇒ the global default.
+- Each subscription has **its own channel** (no shared per-connection
+  queue), so a per-stream `queue_depth` is fully effective — it is
+  *not* capped by a connection-wide buffer. A burst on one stream
+  cannot evict another stream's backlog on the same connection.
 - **`0` means unlimited** (explicit opt-in), at either scope — a
   literal 0-depth queue would be useless, so `0` is the "no cap"
   signal rather than a load error:
-  - Per-stream `queue_depth: 0` ⇒ that subscription is never
-    overflow-dropped for depth (still bounded by the connection's
-    shared channel, which is `WSS_MUX_QUEUE_DEPTH`-sized).
-  - Global `WSS_MUX_QUEUE_DEPTH=0` ⇒ the per-connection channel is
-    **unbounded**. Nothing is dropped for backpressure anywhere.
-    ⚠️ This removes the per-connection memory bound: one stalled or
-    non-reading client can grow memory without limit and OOM the
-    instance. Use it only when consumers are trusted to keep up (or
-    bounded by other means). The bounded default exists for this
-    reason.
+  - Per-stream `queue_depth: 0` ⇒ that subscription's channel is
+    unbounded; it is never overflow-dropped for depth.
+  - Global `WSS_MUX_QUEUE_DEPTH=0` ⇒ every subscription that doesn't
+    set its own `queue_depth` gets an unbounded channel. Nothing is
+    dropped for backpressure. ⚠️ This removes the memory bound: one
+    stalled or non-reading subscription can grow memory without limit
+    and OOM the instance. Use it only when consumers are trusted to
+    keep up (or bounded by other means). The bounded default exists
+    for this reason.
+- **SIGHUP applies to existing subscriptions.** A reload that changes
+  a stream's `queue_depth` recreates the channel of every live
+  subscription on that stream at the new size; frames buffered in the
+  old channel at the instant of the swap are dropped (within the
+  at-most-once contract — SIGHUP is a rare operator action).
 - Tune it per stream: raise it for high-rate streams whose clients
   tolerate bursts, lower it to shed load faster on streams where
   staleness is worse than a gap, set `0` where dropping is never

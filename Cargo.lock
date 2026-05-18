@@ -2183,6 +2183,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "tokio-tungstenite 0.21.0",
  "tracing",

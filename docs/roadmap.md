@@ -63,19 +63,26 @@ Out of scope:
 
 ## v0.4
 
-- ~~Per-stream queue-depth override.~~ Shipped. A subscription's
-  in-flight send queue is bounded by the stream's manifest
-  `queue_depth` (else the global `WSS_MUX_QUEUE_DEPTH`), tracked as
-  per-`(connection, subscription)` in-flight accounting over the
-  retained single per-connection channel — not a separate channel per
-  subscription. This changed the overflow wire-semantics: a subscriber
-  too slow for one stream now gets a keep-open `overflow` `error`
-  frame and that subscription alone is dropped, instead of the whole
-  connection closing with `4429`. The pre-v0.4 connection-level
-  overflow close no longer exists. `queue_depth: 0` / global
-  `WSS_MUX_QUEUE_DEPTH=0` is an explicit "unlimited" opt-in (global 0
-  ⇒ unbounded per-connection channel, trading the memory bound for
-  never dropping). See `docs/protocol.md` and `docs/embedding.md`.
+- ~~Per-stream queue-depth override.~~ Shipped (model **(c)**, see
+  #28). Each subscription has **its own channel**, sized from the
+  stream's manifest `queue_depth` (else the global
+  `WSS_MUX_QUEUE_DEPTH`); the writer drains a `tokio_stream::StreamMap`
+  of those receivers fairly onto the socket, plus a per-connection
+  control channel for closes/connection-level + keep-open `overflow`
+  errors. This changed the overflow wire-semantics: a subscriber too
+  slow for one stream gets a keep-open `overflow` `error` frame and
+  that subscription alone is dropped — the connection and its other
+  subscriptions are untouched; the pre-v0.4 `4429` connection-level
+  overflow close no longer exists. Per-stream depth is now *truly
+  isolated* (no shared per-connection queue; a large per-stream
+  `queue_depth` is no longer capped by a connection-wide buffer).
+  `queue_depth: 0` / global `WSS_MUX_QUEUE_DEPTH=0` is an explicit
+  "unlimited" opt-in (that subscription's channel is unbounded — never
+  drops, at the cost of the memory bound). A SIGHUP `queue_depth`
+  change resizes existing subscriptions (the channel is recreated;
+  frames buffered in the old one are dropped, within the at-most-once
+  contract). The initial accounting-based interim (Approach A, #26) was
+  superseded by this. See `docs/protocol.md` and `docs/embedding.md`.
 - Ed25519 keypair token signing (in addition to HS256).
 - Optional OIDC token validation as an alternative to signed-handshake
   tokens.

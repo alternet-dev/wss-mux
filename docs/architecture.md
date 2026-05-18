@@ -41,10 +41,12 @@ Also serves `/healthz` (200 if the process is alive) and `/readyz`
 
 Receives validated events from the HTTP server. For each event, looks
 up the set of subscriptions matching the event's `stream` (and `key`,
-if narrowed) in the registry. For each match it reserves an in-flight
-slot against that subscription's send-queue cap (the stream's manifest
-`queue_depth`, else the global default), then enqueues a copy of the
-event on the connection's shared send queue.
+if narrowed) in the registry. Each subscription has its own bounded
+channel (sized at subscribe time from the stream's effective
+`queue_depth`); the dispatcher sends a copy of the event straight onto
+that channel. A full channel means that one subscription is
+overflowing — handled per-subscription, with no shared per-connection
+queue.
 
 The dispatcher does not block on slow consumers. A subscription that
 cannot reserve a slot has overflowed and is dropped on its own — the
@@ -66,10 +68,17 @@ scans linearly within a stream.
 
 Accepts WebSocket connections at `/v1/stream`. For each connection:
 
-- One task reads frames from the client (`auth`, `subscribe`,
-  `unsubscribe`).
-- A bounded send queue holds outgoing frames (default 1024).
-- A second task drains the queue to the socket.
+- One reader task handles client frames (`auth`, `subscribe`,
+  `unsubscribe`) and, on subscribe, creates that subscription's
+  channel and hands the receiver to the writer.
+- Each subscription has its own channel; a per-connection control
+  channel carries closes + connection-level / keep-open `overflow`
+  errors.
+- One writer task fairly merges the control channel and a
+  `tokio_stream::StreamMap` of the per-subscription receivers onto the
+  socket. A subscription's receiver ends when its sender is dropped
+  (unsubscribe / overflow / teardown / SIGHUP cap-recreate), and the
+  `StreamMap` evicts it.
 
 When a subscription exceeds its send-queue depth, the server sends an
 `error` frame with `code: overflow` (carrying that subscription's
@@ -125,13 +134,15 @@ per-connection ones and any optional metric pushers.
 
 ## Memory bounds
 
-Per connection: `queue_depth × avg_frame_size` bytes (default
-1024 × ~1KB ≈ 1MB ceiling). Closed connections release memory
-immediately. Setting `WSS_MUX_QUEUE_DEPTH=0` (explicit "unlimited")
-removes this ceiling — the per-connection channel becomes unbounded,
-so a stalled or non-reading client can grow memory without limit.
-That is an opt-in tradeoff for deployments that must never drop
-events and trust their consumers to keep up.
+Per subscription: `effective_queue_depth × avg_frame_size` bytes
+(default 1024 × ~1KB ≈ 1MB per subscription). A connection's ceiling
+is therefore the sum over its subscriptions — bounding load-shedding
+per stream rather than pooling it. Closed connections (and dropped
+subscriptions) release memory immediately. A `queue_depth` of `0`
+(per-stream or global "unlimited") makes that subscription's channel
+unbounded, so a stalled or non-reading subscription can grow memory
+without limit — an opt-in tradeoff for streams that must never drop
+and whose consumers are trusted to keep up.
 
 Per stream: O(active subscriptions). Each subscription is a small
 struct (≈64 bytes).

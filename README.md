@@ -132,7 +132,7 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |
 | `WSS_MUX_STREAMS_MANIFEST_PATH` | — (required) | path to the YAML stream manifest |
 | `WSS_MUX_LISTEN_ADDR` | `0.0.0.0:8080` | bind address for HTTP + WebSocket |
-| `WSS_MUX_QUEUE_DEPTH` | `1024` | per-connection send-queue depth before overflow-close |
+| `WSS_MUX_QUEUE_DEPTH` | `1024` | default per-subscription send-queue depth; `0` = unlimited; per-stream `queue_depth` overrides |
 | `WSS_MUX_ENVELOPE_STREAM_PATH` | `stream` | dotted path to the stream name in the push body |
 | `WSS_MUX_ENVELOPE_KEY_PATH` | `key` | dotted path to the optional key |
 | `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | dotted path to the payload |
