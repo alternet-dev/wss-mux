@@ -249,6 +249,7 @@ mod tests {
                 hs256_secret: Some("k".into()),
                 ed25519_public_pem: None,
             },
+            oidc: None,
             manifest_path: "p".into(),
             queue_depth: 8,
             envelope_stream_path: "stream".into(),
