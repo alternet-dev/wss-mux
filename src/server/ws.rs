@@ -391,7 +391,13 @@ async fn reader_loop(
                 if principals.is_some() {
                     continue;
                 }
-                match state.handshake_verifier().validate(&token) {
+                let auth_result = match state.handshake_verifier() {
+                    Some(v) => v.validate(&token),
+                    // OIDC mode: token validation lands in PR2. Until
+                    // then an OIDC-configured connection cannot auth.
+                    None => Err(AuthError::Invalid("oidc validation pending".into())),
+                };
+                match auth_result {
                     Ok(claims) => {
                         tracing::debug!(conn_id, sub = %claims.sub, "authenticated");
                         principals = Some(claims.principals);
