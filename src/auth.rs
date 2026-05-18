@@ -1,6 +1,12 @@
+use std::str::FromStr;
+
+use jsonwebtoken::jwk::{AlgorithmParameters, Jwk, JwkSet};
 use jsonwebtoken::{decode, decode_header, errors::ErrorKind, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
+
+use crate::config::OidcConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Claims {
@@ -105,6 +111,106 @@ impl HandshakeVerifier {
     }
 }
 
+/// Validates an IdP-issued JWT against the cached JWKS. Mutually
+/// exclusive with [`HandshakeVerifier`] (issuer XOR handshake). The
+/// signing algorithm is taken from the JWK and `Validation` is locked
+/// to it — the token's own `alg` header never widens what is accepted.
+pub struct OidcVerifier {
+    issuer: String,
+    audience: String,
+    groups_claim: String,
+    principal_prefix: String,
+}
+
+impl OidcVerifier {
+    pub fn from_config(cfg: &OidcConfig) -> Self {
+        Self {
+            issuer: cfg.issuer.clone(),
+            audience: cfg.audience.clone(),
+            groups_claim: cfg.groups_claim.clone(),
+            principal_prefix: cfg.principal_prefix.clone(),
+        }
+    }
+
+    pub fn validate(&self, token: &str, jwks: &JwkSet) -> Result<Claims, AuthError> {
+        let header =
+            decode_header(token).map_err(|e| AuthError::Invalid(format!("{:?}", e.kind())))?;
+        let kid = header
+            .kid
+            .ok_or_else(|| AuthError::Invalid("token has no `kid`".into()))?;
+        let jwk = jwks
+            .find(&kid)
+            .ok_or_else(|| AuthError::Invalid(format!("no JWK for kid `{kid}`")))?;
+        let alg = jwk_alg(jwk)
+            .ok_or_else(|| AuthError::Invalid("JWK has no usable signing algorithm".into()))?;
+        let key = DecodingKey::from_jwk(jwk)
+            .map_err(|e| AuthError::Invalid(format!("{:?}", e.kind())))?;
+
+        let mut v = Validation::new(alg);
+        v.set_issuer(&[&self.issuer]);
+        v.set_audience(&[&self.audience]);
+        v.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+        v.validate_nbf = true;
+        v.leeway = 0;
+        let data = decode::<Value>(token, &key, &v).map_err(|e| match e.kind() {
+            ErrorKind::ExpiredSignature => AuthError::Expired,
+            other => AuthError::Invalid(format!("{other:?}")),
+        })?;
+        Ok(map_oidc_claims(
+            &data.claims,
+            &self.groups_claim,
+            &self.principal_prefix,
+        ))
+    }
+}
+
+/// JWT `alg` for a JWK: the JWK's declared algorithm if present, else
+/// inferred from the key type. Returned `alg` is what `Validation` is
+/// locked to (never the token's header `alg`).
+fn jwk_alg(jwk: &Jwk) -> Option<Algorithm> {
+    if let Some(ka) = jwk.common.key_algorithm {
+        return Algorithm::from_str(&ka.to_string()).ok();
+    }
+    match &jwk.algorithm {
+        AlgorithmParameters::RSA(_) => Some(Algorithm::RS256),
+        AlgorithmParameters::EllipticCurve(_) => Some(Algorithm::ES256),
+        AlgorithmParameters::OctetKeyPair(_) => Some(Algorithm::EdDSA),
+        AlgorithmParameters::OctetKey(_) => Some(Algorithm::HS256),
+    }
+}
+
+/// Map validated OIDC claims to the internal [`Claims`]. Principals are
+/// always `user:<sub>` plus every value of the configured groups claim
+/// with the configured prefix. A missing/empty/non-array groups claim
+/// yields just the `user:` principal — a low-privilege set, **not** an
+/// error (parity with a handshake token that carries no principals).
+fn map_oidc_claims(v: &Value, groups_claim: &str, prefix: &str) -> Claims {
+    let sub = v
+        .get("sub")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut principals = vec![format!("user:{sub}")];
+    if let Some(arr) = v.get(groups_claim).and_then(Value::as_array) {
+        for g in arr {
+            if let Some(s) = g.as_str() {
+                principals.push(format!("{prefix}{s}"));
+            }
+        }
+    }
+    Claims {
+        iss: v
+            .get("iss")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        iat: v.get("iat").and_then(Value::as_u64).unwrap_or(0),
+        exp: v.get("exp").and_then(Value::as_u64).unwrap_or(0),
+        sub,
+        principals,
+    }
+}
+
 /// A connection's `principals` are admitted if they satisfy any single
 /// audience entry. An entry is one of:
 /// - `*` — public to *any* authenticated connection (matches even with
@@ -132,9 +238,162 @@ pub fn audience_admits(principals: &[String], audience: &[String]) -> bool {
 mod tests {
     use super::*;
     use jsonwebtoken::{encode, EncodingKey, Header};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use serde_json::json;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const KEY: &str = "secret-key";
+
+    // --- OIDC --------------------------------------------------------
+
+    // HS256 oct JWK; `k` is base64url("secret").
+    fn oidc_jwks() -> JwkSet {
+        serde_json::from_str(r#"{"keys":[{"kty":"oct","kid":"k1","alg":"HS256","k":"c2VjcmV0"}]}"#)
+            .expect("jwks")
+    }
+
+    fn oidc_verifier() -> OidcVerifier {
+        OidcVerifier::from_config(&OidcConfig {
+            issuer: "https://idp.example".into(),
+            audience: "wss-mux".into(),
+            jwks_url: None,
+            groups_claim: "groups".into(),
+            principal_prefix: "role:".into(),
+            jwks_refresh: Duration::from_secs(300),
+        })
+    }
+
+    fn sign_oidc(claims: Value, kid: Option<&str>) -> String {
+        let mut h = Header::new(Algorithm::HS256);
+        h.kid = kid.map(str::to_string);
+        encode(&h, &claims, &EncodingKey::from_secret(b"secret")).unwrap()
+    }
+
+    fn oidc_claims(iss: &str, aud: &str, exp_offset: i64, groups: Option<Value>) -> Value {
+        let n = now() as i64;
+        let mut c = json!({
+            "iss": iss, "aud": aud, "sub": "alice",
+            "iat": n, "exp": n + exp_offset,
+        });
+        if let Some(g) = groups {
+            c["groups"] = g;
+        }
+        c
+    }
+
+    #[test]
+    fn oidc_valid_token_maps_user_and_prefixed_groups() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims(
+                "https://idp.example",
+                "wss-mux",
+                300,
+                Some(json!(["admins", "ops"])),
+            ),
+            Some("k1"),
+        );
+        let claims = v.validate(&t, &oidc_jwks()).expect("valid");
+        assert_eq!(claims.sub, "alice");
+        assert_eq!(
+            claims.principals,
+            vec![
+                "user:alice".to_string(),
+                "role:admins".to_string(),
+                "role:ops".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn oidc_missing_groups_is_low_priv_not_error() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://idp.example", "wss-mux", 300, None),
+            Some("k1"),
+        );
+        let claims = v.validate(&t, &oidc_jwks()).expect("valid, low-priv");
+        assert_eq!(claims.principals, vec!["user:alice".to_string()]);
+    }
+
+    #[test]
+    fn oidc_wrong_audience_is_invalid() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://idp.example", "someone-else", 300, None),
+            Some("k1"),
+        );
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn oidc_wrong_issuer_is_invalid() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://evil.example", "wss-mux", 300, None),
+            Some("k1"),
+        );
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn oidc_expired_is_expired_variant() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://idp.example", "wss-mux", -3600, None),
+            Some("k1"),
+        );
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Expired)
+        ));
+    }
+
+    #[test]
+    fn oidc_unknown_kid_is_invalid() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://idp.example", "wss-mux", 300, None),
+            Some("k2"),
+        );
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn oidc_no_kid_is_invalid() {
+        let v = oidc_verifier();
+        let t = sign_oidc(
+            oidc_claims("https://idp.example", "wss-mux", 300, None),
+            None,
+        );
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn oidc_tampered_signature_is_invalid() {
+        let v = oidc_verifier();
+        let mut t = sign_oidc(
+            oidc_claims("https://idp.example", "wss-mux", 300, None),
+            Some("k1"),
+        );
+        let last = t.pop().unwrap();
+        t.push(if last == 'A' { 'B' } else { 'A' });
+        assert!(matches!(
+            v.validate(&t, &oidc_jwks()),
+            Err(AuthError::Invalid(_))
+        ));
+    }
 
     // Deterministic Ed25519 test keypair (PKCS8 / SPKI PEM).
     const ED25519_PRIV_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEINS+Ri6hNJgwRt84yvchqfGNA8ufVJ/7PlEI7O1RQPWe\n-----END PRIVATE KEY-----\n";

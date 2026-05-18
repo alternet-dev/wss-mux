@@ -146,6 +146,54 @@ Authorization: <your-app-auth>
 
 `wss-mux` itself never mints tokens. It only validates them.
 
+### OIDC validation (alternative to the handshake token)
+
+Instead of a shared/asymmetric handshake key, `wss-mux` can validate
+the `auth`-frame token directly against an OIDC identity provider —
+useful when your clients already carry IdP-issued JWTs. It is
+**opt-in and inert by default**: with `WSS_MUX_OIDC_ISSUER` unset
+nothing changes and no outbound calls are made. Set it and OIDC
+becomes the *only* token authority — it is **mutually exclusive** with
+the handshake key (one trust root; configuring both is a startup
+error), exactly as v0.3's peer-relay treats the cluster's DNS: the IdP
+is the embedder's existing infrastructure, not something `wss-mux`
+runs.
+
+```bash
+WSS_MUX_OIDC_ISSUER=https://idp.example.com   # enables OIDC
+WSS_MUX_OIDC_AUDIENCE=wss-mux                  # required: the aud to pin
+# optional:
+WSS_MUX_OIDC_JWKS_URL=...                      # else discovered from the issuer
+WSS_MUX_OIDC_GROUPS_CLAIM=groups               # default
+WSS_MUX_OIDC_PRINCIPAL_PREFIX=role:            # default: none
+WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
+```
+
+- **Validation.** Signature by `kid` against the JWKS (algorithm
+  taken from the JWK and pinned — the token's own `alg` header never
+  widens what is accepted), plus `iss`, `aud` (mandatory — pinning an
+  audience is required; accepting any `aud` would admit tokens minted
+  for another relying party), and `exp`/`nbf`.
+- **Principal mapping.** Always `user:<sub>`, plus every value of the
+  configured groups claim with the configured prefix (e.g. IdP group
+  `members` + prefix `role:` → principal `role:members`, which then
+  flows through the unchanged manifest audience checks). A
+  missing/empty groups claim yields just `user:<sub>` — a
+  low-privilege set, **not** an error (parity with a handshake token
+  that carries no principals).
+- **JWKS endpoint.** `WSS_MUX_OIDC_JWKS_URL` if set, else discovered
+  from `<issuer>/.well-known/openid-configuration`.
+- **Resilience.** The JWKS is fetched at startup and refreshed every
+  `WSS_MUX_OIDC_JWKS_REFRESH` seconds; a failed refresh is logged +
+  metered (`wss_mux_oidc_jwks_refresh`) and keeps the last-good cache,
+  so an IdP blip does not 401 every client. Until the *first*
+  successful fetch, `/readyz` returns 503 (`wss_mux_oidc_jwks_keys`
+  gauge stays 0) so the pod is kept out of rotation rather than
+  rejecting everyone.
+
+`wss-mux` never contacts the IdP per request — only the periodic JWKS
+poll — and adds no new dependency to do it.
+
 ## 3. Declaring streams and audiences
 
 `wss-mux` loads a manifest at startup. It declares which streams

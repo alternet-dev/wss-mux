@@ -16,7 +16,7 @@ use dashmap::DashMap;
 use jsonwebtoken::jwk::JwkSet;
 use tokio::sync::watch;
 
-use crate::auth::HandshakeVerifier;
+use crate::auth::{HandshakeVerifier, OidcVerifier};
 use crate::config::Config;
 use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
@@ -44,6 +44,9 @@ struct Inner {
     // bad key fails startup loudly. `None` when OIDC is configured
     // (issuer XOR handshake — there is no handshake key to build).
     handshake_verifier: Option<HandshakeVerifier>,
+    // Built at startup when OIDC is configured (`Some` iff
+    // `handshake_verifier` is `None` — issuer XOR handshake).
+    oidc_verifier: Option<OidcVerifier>,
     // Cached OIDC JWKS, refreshed by `spawn_oidc_jwks_refresher`. Same
     // watch pattern as `peers_tx`: cheap borrow() on the validate path,
     // single writer (the refresher / tests via set_jwks). Empty until
@@ -80,6 +83,7 @@ impl AppState {
         } else {
             None
         };
+        let oidc_verifier = config.oidc.as_ref().map(OidcVerifier::from_config);
         let (manifest_tx, _) = watch::channel(None);
         let (peers_tx, _) = watch::channel(Arc::new(Vec::new()));
         let (jwks_tx, _) = watch::channel(Arc::new(JwkSet { keys: Vec::new() }));
@@ -90,6 +94,7 @@ impl AppState {
                 peers_tx,
                 relay_client,
                 handshake_verifier,
+                oidc_verifier,
                 jwks_tx,
                 registry: Registry::new(),
                 control: DashMap::new(),
@@ -190,6 +195,12 @@ impl AppState {
     /// configured instead (mutually exclusive).
     pub fn handshake_verifier(&self) -> Option<&HandshakeVerifier> {
         self.inner.handshake_verifier.as_ref()
+    }
+
+    /// The OIDC verifier, built at startup when `WSS_MUX_OIDC_ISSUER`
+    /// is set (mutually exclusive with the handshake verifier).
+    pub fn oidc_verifier(&self) -> Option<&OidcVerifier> {
+        self.inner.oidc_verifier.as_ref()
     }
 
     pub fn next_conn_id(&self) -> ConnId {

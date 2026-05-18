@@ -1,4 +1,5 @@
 mod auth_ed25519;
+mod auth_oidc;
 mod cbor;
 mod common;
 mod envelope_shape;

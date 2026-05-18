@@ -391,11 +391,11 @@ async fn reader_loop(
                 if principals.is_some() {
                     continue;
                 }
-                let auth_result = match state.handshake_verifier() {
-                    Some(v) => v.validate(&token),
-                    // OIDC mode: token validation lands in PR2. Until
-                    // then an OIDC-configured connection cannot auth.
-                    None => Err(AuthError::Invalid("oidc validation pending".into())),
+                // Issuer XOR handshake — exactly one verifier is set.
+                let auth_result = match (state.handshake_verifier(), state.oidc_verifier()) {
+                    (Some(v), _) => v.validate(&token),
+                    (_, Some(o)) => o.validate(&token, &state.jwks()),
+                    (None, None) => Err(AuthError::Invalid("no token validator configured".into())),
                 };
                 match auth_result {
                     Ok(claims) => {
