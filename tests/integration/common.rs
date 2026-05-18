@@ -32,6 +32,7 @@ pub fn test_config() -> Config {
             hs256_secret: Some(SIGNING_KEY.into()),
             ed25519_public_pem: None,
         },
+        oidc: None,
         manifest_path: "test.yaml".into(),
         queue_depth: 1024,
         envelope_stream_path: "stream".into(),

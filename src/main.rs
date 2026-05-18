@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
 
     spawn_sighup_reloader(state.clone());
     spawn_peer_refresher(state.clone());
+    spawn_oidc_jwks_refresher(state.clone());
 
     let listener = TcpListener::bind(state.config().listen_addr).await?;
     tracing::info!(addr = %listener.local_addr()?, "wss-mux listening");
@@ -53,6 +54,49 @@ fn spawn_peer_refresher(state: AppState) {
                 return; // fixed fleet — no polling
             }
             tokio::time::sleep(peer_cfg.dns_refresh).await;
+        }
+    });
+}
+
+/// Keep the OIDC JWKS fresh. Not spawned unless `WSS_MUX_OIDC_ISSUER`
+/// is set (OIDC disabled ⇒ inert, no outbound calls). Startup fetch,
+/// then refresh every `WSS_MUX_OIDC_JWKS_REFRESH`. A failed fetch is
+/// logged + metered and keeps the last-good cache — a transient IdP
+/// blip must never 401 every client (same posture as the manifest
+/// reloader and peer refresher; `readyz` still gates a never-fetched
+/// JWKS out of rotation).
+fn spawn_oidc_jwks_refresher(state: AppState) {
+    let Some(oidc) = state.config().oidc.clone() else {
+        return;
+    };
+    tokio::spawn(async move {
+        let http = reqwest::Client::new();
+        loop {
+            match wss_mux::oidc::fetch_jwks(&http, &oidc).await {
+                Ok(set) => {
+                    let keys = set.keys.len();
+                    state.set_jwks(set);
+                    state
+                        .metrics()
+                        .oidc_jwks_refresh
+                        .get_or_create(&ReloadResultLabel {
+                            result: ReloadResult::Ok,
+                        })
+                        .inc();
+                    tracing::info!(keys, "oidc jwks refreshed");
+                }
+                Err(e) => {
+                    state
+                        .metrics()
+                        .oidc_jwks_refresh
+                        .get_or_create(&ReloadResultLabel {
+                            result: ReloadResult::Error,
+                        })
+                        .inc();
+                    tracing::error!(error = %e, "oidc jwks refresh failed; keeping last-good");
+                }
+            }
+            tokio::time::sleep(oidc.jwks_refresh).await;
         }
     });
 }

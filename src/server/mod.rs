@@ -13,6 +13,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::Router;
 use dashmap::DashMap;
+use jsonwebtoken::jwk::JwkSet;
 use tokio::sync::watch;
 
 use crate::auth::HandshakeVerifier;
@@ -40,9 +41,14 @@ struct Inner {
     // Built once at startup from PeerConfig (timeout + optional TLS).
     relay_client: reqwest::Client,
     // Built once at startup from the configured handshake key(s); a
-    // bad key fails startup loudly rather than rejecting every
-    // connection at runtime.
-    handshake_verifier: HandshakeVerifier,
+    // bad key fails startup loudly. `None` when OIDC is configured
+    // (issuer XOR handshake — there is no handshake key to build).
+    handshake_verifier: Option<HandshakeVerifier>,
+    // Cached OIDC JWKS, refreshed by `spawn_oidc_jwks_refresher`. Same
+    // watch pattern as `peers_tx`: cheap borrow() on the validate path,
+    // single writer (the refresher / tests via set_jwks). Empty until
+    // the first successful fetch (OIDC disabled ⇒ stays empty, inert).
+    jwks_tx: watch::Sender<Arc<JwkSet>>,
     registry: Registry,
     // Per-connection control channel: connection-level frames, typed
     // closes, and the keep-open `overflow` error (sent here because the
@@ -64,12 +70,19 @@ impl AppState {
     /// than silently degrading.
     pub fn try_new(config: Config) -> anyhow::Result<Self> {
         let relay_client = crate::peers::build_relay_client(&config.peers)?;
-        let handshake_verifier = HandshakeVerifier::new(
-            config.handshake_keys.hs256_secret.as_deref(),
-            config.handshake_keys.ed25519_public_pem.as_deref(),
-        )?;
+        // OIDC is mutually exclusive with the handshake key: build the
+        // handshake verifier only when OIDC is not configured.
+        let handshake_verifier = if config.oidc.is_none() {
+            Some(HandshakeVerifier::new(
+                config.handshake_keys.hs256_secret.as_deref(),
+                config.handshake_keys.ed25519_public_pem.as_deref(),
+            )?)
+        } else {
+            None
+        };
         let (manifest_tx, _) = watch::channel(None);
         let (peers_tx, _) = watch::channel(Arc::new(Vec::new()));
+        let (jwks_tx, _) = watch::channel(Arc::new(JwkSet { keys: Vec::new() }));
         Ok(Self {
             inner: Arc::new(Inner {
                 config,
@@ -77,6 +90,7 @@ impl AppState {
                 peers_tx,
                 relay_client,
                 handshake_verifier,
+                jwks_tx,
                 registry: Registry::new(),
                 control: DashMap::new(),
                 sub_senders: DashMap::new(),
@@ -136,6 +150,22 @@ impl AppState {
         self.inner.peers_tx.send_replace(Arc::new(peers));
     }
 
+    /// Current OIDC JWKS snapshot. Cheap `Arc` clone, independent of a
+    /// concurrent refresh.
+    pub fn jwks(&self) -> Arc<JwkSet> {
+        self.inner.jwks_tx.borrow().clone()
+    }
+
+    /// Replace the cached JWKS (refresher task, or tests). Publishes the
+    /// `wss_mux_oidc_jwks_keys` gauge from one place.
+    pub fn set_jwks(&self, jwks: JwkSet) {
+        self.inner
+            .metrics
+            .oidc_jwks_keys
+            .set(jwks.keys.len() as i64);
+        self.inner.jwks_tx.send_replace(Arc::new(jwks));
+    }
+
     /// The shared relay HTTP client (per-relay timeout + optional TLS).
     pub fn relay_client(&self) -> &reqwest::Client {
         &self.inner.relay_client
@@ -156,9 +186,10 @@ impl AppState {
     }
 
     /// The handshake-token verifier built at startup from the
-    /// configured HS256 / Ed25519 key(s).
-    pub fn handshake_verifier(&self) -> &HandshakeVerifier {
-        &self.inner.handshake_verifier
+    /// configured HS256 / Ed25519 key(s). `None` when OIDC is
+    /// configured instead (mutually exclusive).
+    pub fn handshake_verifier(&self) -> Option<&HandshakeVerifier> {
+        self.inner.handshake_verifier.as_ref()
     }
 
     pub fn next_conn_id(&self) -> ConnId {
@@ -230,11 +261,15 @@ async fn healthz() -> &'static str {
 }
 
 async fn readyz(State(state): State<AppState>) -> (StatusCode, &'static str) {
-    if state.manifest().is_some() {
-        (StatusCode::OK, "ready")
-    } else {
-        (StatusCode::SERVICE_UNAVAILABLE, "not ready")
+    if state.manifest().is_none() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready");
     }
+    // With OIDC enabled, a never-fetched (empty) JWKS would 401 every
+    // client — keep the pod out of rotation until keys are cached.
+    if state.config().oidc.is_some() && state.jwks().keys.is_empty() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready: oidc jwks");
+    }
+    (StatusCode::OK, "ready")
 }
 
 #[cfg(test)]
@@ -249,6 +284,7 @@ mod tests {
                 hs256_secret: Some("k".into()),
                 ed25519_public_pem: None,
             },
+            oidc: None,
             manifest_path: "p".into(),
             queue_depth: 8,
             envelope_stream_path: "stream".into(),

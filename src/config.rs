@@ -17,6 +17,8 @@ pub const DEFAULT_ENVELOPE_KEY_PATH: &str = "key";
 pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
 pub const DEFAULT_INBOUND_RATE: u32 = 50;
 pub const DEFAULT_INBOUND_BURST: u32 = 100;
+pub const DEFAULT_OIDC_GROUPS_CLAIM: &str = "groups";
+pub const DEFAULT_OIDC_JWKS_REFRESH_SECS: u64 = 300;
 
 /// Handshake-token verification keys. At least one of HS256 / Ed25519
 /// must be configured; both is allowed (the token's `alg` then selects
@@ -31,11 +33,42 @@ pub struct HandshakeKeyConfig {
     pub ed25519_public_pem: Option<String>,
 }
 
+/// Optional OIDC validation. Present only when `WSS_MUX_OIDC_ISSUER`
+/// is set, in which case the auth-frame token is validated *solely*
+/// against the IdP — mutually exclusive with the handshake key (one
+/// trust root, no issuer/alg-confusion surface). Unset ⇒ inert,
+/// behaviour byte-identical to handshake-only.
+#[derive(Debug, Clone)]
+pub struct OidcConfig {
+    /// `WSS_MUX_OIDC_ISSUER` — the IdP issuer URL; also the `iss` the
+    /// token must carry.
+    pub issuer: String,
+    /// `WSS_MUX_OIDC_AUDIENCE` — required: the `aud` the token must
+    /// carry (pinning an audience is mandatory; accepting any
+    /// audience is unsafe).
+    pub audience: String,
+    /// `WSS_MUX_OIDC_JWKS_URL` — explicit JWKS endpoint; absent ⇒
+    /// discovered from `<issuer>/.well-known/openid-configuration`.
+    pub jwks_url: Option<String>,
+    /// `WSS_MUX_OIDC_GROUPS_CLAIM` (default `groups`) — array claim
+    /// whose values become principals.
+    pub groups_claim: String,
+    /// `WSS_MUX_OIDC_PRINCIPAL_PREFIX` (default empty) — prefix applied
+    /// to each group value (e.g. `role:`) so IdP groups line up with
+    /// manifest audiences.
+    pub principal_prefix: String,
+    /// `WSS_MUX_OIDC_JWKS_REFRESH` seconds (default 300).
+    pub jwks_refresh: Duration,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub push_auth_token: String,
     pub handshake_keys: HandshakeKeyConfig,
+    /// OIDC validation, when `WSS_MUX_OIDC_ISSUER` is set (mutually
+    /// exclusive with `handshake_keys`).
+    pub oidc: Option<OidcConfig>,
     pub manifest_path: PathBuf,
     pub queue_depth: usize,
     /// Dotted path into the push body where the stream name lives.
@@ -112,10 +145,16 @@ pub enum ConfigError {
     #[error("missing required env var: {0}")]
     Missing(&'static str),
     #[error(
-        "at least one handshake key required: set WSS_MUX_HANDSHAKE_SIGNING_KEY \
-         and/or WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY[_FILE]"
+        "no token-validation method configured: set WSS_MUX_OIDC_ISSUER, \
+         or a handshake key (WSS_MUX_HANDSHAKE_SIGNING_KEY and/or \
+         WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY[_FILE])"
     )]
     MissingHandshakeKey,
+    #[error(
+        "WSS_MUX_OIDC_ISSUER and a handshake key are mutually exclusive — \
+         configure exactly one token-validation method"
+    )]
+    OidcAndHandshakeKey,
     #[error("failed to read {var} at `{path}`: {source}")]
     HandshakeKeyFile {
         var: &'static str,
@@ -181,9 +220,8 @@ impl Config {
                 None => None,
             },
         };
-        if hs256_secret.is_none() && ed25519_public_pem.is_none() {
-            return Err(ConfigError::MissingHandshakeKey);
-        }
+        // The handshake-key requirement is resolved jointly with OIDC
+        // below (issuer XOR handshake; neither ⇒ error).
         let handshake_keys = HandshakeKeyConfig {
             hs256_secret,
             ed25519_public_pem,
@@ -239,6 +277,37 @@ impl Config {
             v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
         };
 
+        // Auth method: OIDC issuer XOR handshake key(s). Both ⇒ error
+        // (one trust root); neither ⇒ error (no way to validate).
+        let oidc_issuer = non_blank(get("WSS_MUX_OIDC_ISSUER"));
+        let has_handshake =
+            handshake_keys.hs256_secret.is_some() || handshake_keys.ed25519_public_pem.is_some();
+        match (oidc_issuer.is_some(), has_handshake) {
+            (true, true) => return Err(ConfigError::OidcAndHandshakeKey),
+            (false, false) => return Err(ConfigError::MissingHandshakeKey),
+            _ => {}
+        }
+        let oidc = match oidc_issuer {
+            Some(issuer) => Some(OidcConfig {
+                issuer,
+                // Pinning an audience is mandatory — accepting any
+                // `aud` would let tokens minted for another relying
+                // party authenticate here.
+                audience: non_blank(get("WSS_MUX_OIDC_AUDIENCE"))
+                    .ok_or(ConfigError::Missing("WSS_MUX_OIDC_AUDIENCE"))?,
+                jwks_url: non_blank(get("WSS_MUX_OIDC_JWKS_URL")),
+                groups_claim: non_blank(get("WSS_MUX_OIDC_GROUPS_CLAIM"))
+                    .unwrap_or_else(|| DEFAULT_OIDC_GROUPS_CLAIM.to_string()),
+                principal_prefix: non_blank(get("WSS_MUX_OIDC_PRINCIPAL_PREFIX"))
+                    .unwrap_or_default(),
+                jwks_refresh: Duration::from_secs(parse_u64(
+                    "WSS_MUX_OIDC_JWKS_REFRESH",
+                    DEFAULT_OIDC_JWKS_REFRESH_SECS,
+                )?),
+            }),
+            None => None,
+        };
+
         let peers = PeerConfig {
             relay_enabled: match get("WSS_MUX_PEER_RELAY") {
                 Some(v) => !v.trim().eq_ignore_ascii_case("off"),
@@ -271,6 +340,7 @@ impl Config {
             listen_addr,
             push_auth_token,
             handshake_keys,
+            oidc,
             manifest_path,
             queue_depth,
             envelope_stream_path,
@@ -315,6 +385,10 @@ mod tests {
             Some("handshake-secret")
         );
         assert!(cfg.handshake_keys.ed25519_public_pem.is_none());
+        assert!(
+            cfg.oidc.is_none(),
+            "OIDC is off unless WSS_MUX_OIDC_ISSUER set"
+        );
         assert_eq!(cfg.manifest_path.to_str(), Some("./streams.yaml"));
         assert_eq!(cfg.envelope_stream_path, "stream");
         assert_eq!(cfg.envelope_key_path, "key");
@@ -403,6 +477,83 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("BEGIN PUBLIC KEY"));
+    }
+
+    #[test]
+    fn oidc_issuer_with_a_handshake_key_is_mutually_exclusive_error() {
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_HANDSHAKE_SIGNING_KEY", "hs"),
+            ("WSS_MUX_OIDC_ISSUER", "https://idp.example"),
+            ("WSS_MUX_OIDC_AUDIENCE", "wss-mux"),
+        ];
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(err, ConfigError::OidcAndHandshakeKey));
+    }
+
+    #[test]
+    fn oidc_issuer_alone_configures_oidc_with_defaults() {
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_OIDC_ISSUER", "https://idp.example"),
+            ("WSS_MUX_OIDC_AUDIENCE", "wss-mux"),
+        ];
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        // OIDC replaces the handshake-key requirement entirely.
+        assert!(cfg.handshake_keys.hs256_secret.is_none());
+        assert!(cfg.handshake_keys.ed25519_public_pem.is_none());
+        let oidc = cfg.oidc.expect("oidc configured");
+        assert_eq!(oidc.issuer, "https://idp.example");
+        assert_eq!(oidc.audience, "wss-mux");
+        assert!(oidc.jwks_url.is_none(), "discovery unless overridden");
+        assert_eq!(oidc.groups_claim, "groups");
+        assert_eq!(oidc.principal_prefix, "");
+        assert_eq!(oidc.jwks_refresh, std::time::Duration::from_secs(300));
+    }
+
+    #[test]
+    fn oidc_issuer_without_audience_is_error() {
+        // Pinning an audience is mandatory.
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_OIDC_ISSUER", "https://idp.example"),
+        ];
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(err, ConfigError::Missing("WSS_MUX_OIDC_AUDIENCE")));
+    }
+
+    #[test]
+    fn oidc_overrides_parse_and_bad_refresh_errors() {
+        let base = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_OIDC_ISSUER", "https://idp.example"),
+            ("WSS_MUX_OIDC_AUDIENCE", "wss-mux"),
+            ("WSS_MUX_OIDC_JWKS_URL", "https://idp.example/keys"),
+            ("WSS_MUX_OIDC_GROUPS_CLAIM", "roles"),
+            ("WSS_MUX_OIDC_PRINCIPAL_PREFIX", "role:"),
+            ("WSS_MUX_OIDC_JWKS_REFRESH", "60"),
+        ];
+        let cfg = Config::from_getter(env(&base)).expect("config");
+        let oidc = cfg.oidc.expect("oidc");
+        assert_eq!(oidc.jwks_url.as_deref(), Some("https://idp.example/keys"));
+        assert_eq!(oidc.groups_claim, "roles");
+        assert_eq!(oidc.principal_prefix, "role:");
+        assert_eq!(oidc.jwks_refresh, std::time::Duration::from_secs(60));
+
+        let mut bad = base.clone();
+        bad.retain(|(k, _)| *k != "WSS_MUX_OIDC_JWKS_REFRESH");
+        bad.push(("WSS_MUX_OIDC_JWKS_REFRESH", "nope"));
+        assert!(matches!(
+            Config::from_getter(env(&bad)).expect_err("error"),
+            ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_OIDC_JWKS_REFRESH",
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -130,6 +130,12 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — | HS256 client-token secret; optional if an Ed25519 key is set |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY` | — | Ed25519 (EdDSA) client-token public key, inline PEM |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |
+| `WSS_MUX_OIDC_ISSUER` | — | OIDC issuer URL; enables OIDC token validation (mutually exclusive with the handshake keys) |
+| `WSS_MUX_OIDC_AUDIENCE` | — | required when OIDC is enabled: the `aud` tokens must carry |
+| `WSS_MUX_OIDC_JWKS_URL` | — | explicit JWKS endpoint; absent ⇒ discovered from the issuer |
+| `WSS_MUX_OIDC_GROUPS_CLAIM` | `groups` | array claim mapped to principals |
+| `WSS_MUX_OIDC_PRINCIPAL_PREFIX` | — | prefix applied to each group value (e.g. `role:`) |
+| `WSS_MUX_OIDC_JWKS_REFRESH` | `300` | JWKS re-fetch interval (seconds) |
 | `WSS_MUX_STREAMS_MANIFEST_PATH` | — (required) | path to the YAML stream manifest |
 | `WSS_MUX_LISTEN_ADDR` | `0.0.0.0:8080` | bind address for HTTP + WebSocket |
 | `WSS_MUX_QUEUE_DEPTH` | `1024` | default per-subscription send-queue depth; `0` = unlimited; per-stream `queue_depth` overrides |

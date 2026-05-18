@@ -138,6 +138,11 @@ pub struct Metrics {
     pub relay_failed: Family<RelayFailureLabel, Counter>,
     pub peers_known: Gauge,
     pub events_rejected: Family<RejectReasonLabel, Counter>,
+    /// Keys currently in the cached OIDC JWKS (`0` until first fetch).
+    pub oidc_jwks_keys: Gauge,
+    /// OIDC JWKS refresh attempts, labeled by result (reuses the
+    /// manifest-reload Ok/Error label).
+    pub oidc_jwks_refresh: Family<ReloadResultLabel, Counter>,
 }
 
 impl Default for Metrics {
@@ -157,6 +162,8 @@ impl Default for Metrics {
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
         let peers_known = Gauge::default();
         let events_rejected = Family::<RejectReasonLabel, Counter>::default();
+        let oidc_jwks_keys = Gauge::default();
+        let oidc_jwks_refresh = Family::<ReloadResultLabel, Counter>::default();
 
         registry.register(
             "wss_mux_connections",
@@ -223,6 +230,16 @@ impl Default for Metrics {
             "Events rejected at ingest before dispatch, labeled by reason",
             events_rejected.clone(),
         );
+        registry.register(
+            "wss_mux_oidc_jwks_keys",
+            "Keys currently in the cached OIDC JWKS",
+            oidc_jwks_keys.clone(),
+        );
+        registry.register(
+            "wss_mux_oidc_jwks_refresh",
+            "OIDC JWKS refresh attempts, labeled by result",
+            oidc_jwks_refresh.clone(),
+        );
 
         Self {
             registry: Mutex::new(registry),
@@ -239,6 +256,8 @@ impl Default for Metrics {
             relay_failed,
             peers_known,
             events_rejected,
+            oidc_jwks_keys,
+            oidc_jwks_refresh,
         }
     }
 }
