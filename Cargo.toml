@@ -45,6 +45,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 [dev-dependencies]
 tokio-test = "0.4"
 assert_matches = "1"
+# In-test OIDC IdP (JWKS + discovery) for the auth_oidc suite; same
+# axum as the normal dep, features unified — no production impact.
+axum = "0.7"
 # Adds the `json` feature on top of the normal-dependency `rustls-tls`
 # for the HTTP integration suite; Cargo unifies features so the
 # production build keeps the minimal `rustls-tls`-only surface.
