@@ -83,9 +83,20 @@ Out of scope:
   frames buffered in the old one are dropped, within the at-most-once
   contract). The initial accounting-based interim (Approach A, #26) was
   superseded by this. See `docs/protocol.md` and `docs/embedding.md`.
-- Ed25519 keypair token signing (in addition to HS256).
-- Optional OIDC token validation as an alternative to signed-handshake
-  tokens.
+- ~~Ed25519 keypair token signing (in addition to HS256).~~ Shipped
+  (#29). EdDSA verification is **additive** to HS256: set
+  `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY[_FILE]` alongside or instead of
+  the HS256 secret; the token's `alg` selects the trust root. See
+  `docs/embedding.md`.
+- ~~Optional OIDC token validation as an alternative to signed-handshake
+  tokens.~~ Shipped (#31 config + JWKS, #32/#33 validation + ws
+  wiring). Opt-in via `WSS_MUX_OIDC_ISSUER` and **mutually exclusive**
+  with the handshake key (issuer XOR handshake — configuring both, or
+  neither, is a startup error); inert with no issuer set. Validates the
+  `auth`-frame JWT against the issuer's JWKS (discovered from the
+  issuer or an explicit URL, refreshed by a background task), pins
+  `aud`, and maps a configurable groups claim to principals
+  (`user:<sub>` plus each prefixed group). See `docs/embedding.md`.
 
 ## v0.5
 

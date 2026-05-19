@@ -10,7 +10,7 @@ producer ----push events----> wss-mux <----WebSocket---- clients
                                   |
                                   +- many subscriptions per client
                                   +- per-subscription audience check
-                                  +- overflow-close backpressure
+                                  +- per-subscription overflow backpressure
 ```
 
 ## Why
@@ -53,7 +53,7 @@ It IS:
 It IS NOT:
 - A message broker. Bring your own event source.
 - A persistence layer. No durable subscriptions, no replay.
-- An auth server. Bring your own signed-token issuer.
+- An auth server. Bring your own token issuer (signed-handshake or OIDC).
 - A bidirectional command transport.
 - A presence service. (Add a stream for it and publish to that stream
   yourself.)
@@ -166,6 +166,12 @@ Operational notes:
   subprotocol for CBOR instead of JSON; frame shapes are identical.
 - **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
   `/healthz` and `/readyz` are the liveness/readiness probes.
+- **Token validation.** Signed-handshake tokens (HS256 and/or
+  Ed25519/EdDSA — the token's `alg` picks the key) *or*, mutually
+  exclusively, OIDC: the `auth` token is validated against an OIDC
+  issuer's JWKS and a groups claim maps to principals (`WSS_MUX_OIDC_*`,
+  opt-in and inert until `WSS_MUX_OIDC_ISSUER` is set). `wss-mux` only
+  validates tokens; it never mints them.
 - **Peer-relay.** Run >1 instance and a producer push is relayed once
   to discovered peers so every subscriber sees it, with zero new
   infrastructure. Active by default, inert with no resolvable peers
