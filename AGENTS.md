@@ -21,12 +21,15 @@ required.
 5. [docs/embedding.md](docs/embedding.md) — integration patterns
 6. [docs/operations.md](docs/operations.md) — running it (multi-instance)
 7. [docs/roadmap.md](docs/roadmap.md) — versioned plan
-8. Source: `src/main.rs` → `src/server/` → `src/registry.rs` +
+8. Source: `src/main.rs` → `src/server/` → `src/auth.rs` +
+   `src/oidc.rs` (token validation) → `src/registry.rs` +
    `src/dispatcher.rs` → `src/peers/` (cross-instance relay)
 
 ## Key invariants
 
-- `wss-mux` does NOT mint tokens. Only validates.
+- `wss-mux` does NOT mint tokens. Only validates — signed-handshake
+  (HS256/Ed25519) or, mutually exclusively, against an OIDC issuer's
+  JWKS. It never runs or mandates an identity provider.
 - `wss-mux` does NOT persist subscriptions or events.
 - `wss-mux` does NOT replicate subscription state across instances.
   It performs one-hop, best-effort event relay to discovered peers:
@@ -38,10 +41,11 @@ required.
   producer.
 - The default build's only non-Rust code is `ring` (C + assembly),
   pulled transitively for crypto: `jsonwebtoken` (token validation,
-  since v0.1) and `rustls` (peer-relay TLS client, since v0.3). That
-  is why the Docker runtime stage is `distroless/cc`. New code must
-  not add a *different* native-dependency class — keep crypto on the
-  existing `ring` baseline.
+  since v0.1; Ed25519 and OIDC JWKS verification, v0.4) and `rustls`
+  (peer-relay TLS client since v0.3, also the OIDC JWKS fetch in
+  v0.4). That is why the Docker runtime stage is `distroless/cc`. New
+  code must not add a *different* native-dependency class — keep
+  crypto on the existing `ring` baseline.
 
 ## What NOT to do
 
@@ -58,7 +62,9 @@ required.
 - **No new external-infrastructure dependency.** No broker, database,
   or other service the operator must run. This is the hard line that
   rejected the Redis adapter; peer-relay rides the existing HTTP stack
-  + cluster DNS precisely to preserve it.
+  + cluster DNS precisely to preserve it. OIDC validation does not
+  cross this line: it is opt-in and validates against the operator's
+  *existing* identity provider — `wss-mux` mandates no new service.
 - **No features that contradict the at-most-once / ephemeral
   contract** without an explicit version bump and roadmap entry.
 

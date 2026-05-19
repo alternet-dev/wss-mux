@@ -89,11 +89,18 @@ When a subscription exceeds its send-queue depth, the server sends an
 Two pure-function checks:
 
 1. **Token validation** at connection auth time. Signature + TTL.
+   Signed-handshake tokens verify against the configured HS256 and/or
+   Ed25519 key (`alg`-selected). The mutually-exclusive OIDC mode
+   instead verifies the JWT against the issuer's JWKS by `kid` and
+   pins `aud`; the JWKS is fetched and refreshed by a background task,
+   so this check itself stays local.
 2. **Audience intersection** at subscribe time. Connection's
-   principals ∩ stream's audience.
+   principals ∩ stream's audience. OIDC maps the token's groups claim
+   to those principals; signed-handshake tokens carry them directly.
 
-Neither makes a network call. Both read from the connection's state
-plus the manifest.
+Neither makes a network call on the request path. Both read from the
+connection's state plus the manifest — OIDC additionally from the
+background-refreshed JWKS, never an inline fetch.
 
 ### Manifest
 
@@ -168,5 +175,7 @@ occupancy is near zero outside fanout bursts.
 
 The default build links one piece of non-Rust code: `ring` (C +
 assembly), pulled transitively for crypto (`jsonwebtoken` token
-validation since v0.1; `rustls` peer-TLS since v0.3). It needs no
-external service to run.
+validation since v0.1, incl. Ed25519 + OIDC JWKS verification since
+v0.4; `rustls` peer-TLS since v0.3, which also carries the OIDC JWKS
+fetch). It needs no external service to run — OIDC, when enabled,
+validates against the operator's existing identity provider.
