@@ -139,6 +139,16 @@ pub struct Metrics {
     /// — the cross-instance-waste / stream-sparsity signal that gates
     /// the deferred Selective Relay.
     pub relay_events_unwanted: Counter,
+    /// Relay coalescing flush cycles (one per window/size flush).
+    pub relay_flushes: Counter,
+    /// Events handed to the peer-relay path (enqueued or direct).
+    pub relay_events_relayed: Counter,
+    /// Current depth of the relay coalescing queue.
+    pub relay_queue_depth: Gauge,
+    /// Relay batches dropped because the coalescing queue was full.
+    pub relay_queue_dropped: Counter,
+    /// Relay flush-task supervised restarts (should stay 0).
+    pub relay_flush_restarts: Counter,
     pub relay_failed: Family<RelayFailureLabel, Counter>,
     pub peers_known: Gauge,
     pub events_rejected: Family<RejectReasonLabel, Counter>,
@@ -164,6 +174,11 @@ impl Default for Metrics {
         let frames_rate_limited = Counter::default();
         let relay_sent = Counter::default();
         let relay_events_unwanted = Counter::default();
+        let relay_flushes = Counter::default();
+        let relay_events_relayed = Counter::default();
+        let relay_queue_depth = Gauge::default();
+        let relay_queue_dropped = Counter::default();
+        let relay_flush_restarts = Counter::default();
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
         let peers_known = Gauge::default();
         let events_rejected = Family::<RejectReasonLabel, Counter>::default();
@@ -226,6 +241,31 @@ impl Default for Metrics {
             relay_events_unwanted.clone(),
         );
         registry.register(
+            "wss_mux_relay_flushes",
+            "Relay coalescing flush cycles",
+            relay_flushes.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_events_relayed",
+            "Events handed to the peer-relay path",
+            relay_events_relayed.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_queue_depth",
+            "Current depth of the relay coalescing queue",
+            relay_queue_depth.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_queue_dropped",
+            "Relay batches dropped because the coalescing queue was full",
+            relay_queue_dropped.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_flush_restarts",
+            "Relay flush-task supervised restarts (should stay 0)",
+            relay_flush_restarts.clone(),
+        );
+        registry.register(
             "wss_mux_relay_failed",
             "Peer-relay deliveries that failed, labeled by reason",
             relay_failed.clone(),
@@ -264,6 +304,11 @@ impl Default for Metrics {
             frames_rate_limited,
             relay_sent,
             relay_events_unwanted,
+            relay_flushes,
+            relay_events_relayed,
+            relay_queue_depth,
+            relay_queue_dropped,
+            relay_flush_restarts,
             relay_failed,
             peers_known,
             events_rejected,
@@ -279,5 +324,30 @@ impl Metrics {
         let registry = self.registry.lock().expect("metrics registry mutex");
         prometheus_client::encoding::text::encode(&mut buf, &registry).expect("encode metrics");
         buf
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coalescing_metrics_are_registered() {
+        let m = Metrics::default();
+        m.relay_flushes.inc();
+        m.relay_events_relayed.inc_by(3);
+        m.relay_queue_depth.set(7);
+        m.relay_queue_dropped.inc();
+        m.relay_flush_restarts.inc();
+        let body = m.encode();
+        for needle in [
+            "wss_mux_relay_flushes_total 1",
+            "wss_mux_relay_events_relayed_total 3",
+            "wss_mux_relay_queue_depth 7",
+            "wss_mux_relay_queue_dropped_total 1",
+            "wss_mux_relay_flush_restarts_total 1",
+        ] {
+            assert!(body.contains(needle), "missing {needle} in:\n{body}");
+        }
     }
 }
