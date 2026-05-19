@@ -7,7 +7,7 @@ use self::metrics::Metrics;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -23,6 +23,7 @@ use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
 use crate::registry::Registry;
+use crate::server::relay::RelayBatch;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -66,6 +67,13 @@ struct Inner {
     sub_senders: DashMap<(ConnId, String), (OutboundTx, usize)>,
     next_conn_id: AtomicU64,
     metrics: Metrics,
+    // Relay coalescing queue. `Some` only when peer-relay is enabled
+    // AND WSS_MUX_RELAY_COALESCE_MS > 0. `accept_events` enqueues here;
+    // the supervised flush task drains it. `None` ⇒ coalescing off,
+    // relay spawned per push (pre-v0.5 behaviour).
+    relay_tx: Option<tokio::sync::mpsc::Sender<RelayBatch>>,
+    // Receiver, taken once by the flush-task spawner at startup.
+    relay_rx: Mutex<Option<tokio::sync::mpsc::Receiver<RelayBatch>>>,
 }
 
 impl AppState {
@@ -88,6 +96,12 @@ impl AppState {
         let (manifest_tx, _) = watch::channel(None);
         let (peers_tx, _) = watch::channel(Arc::new(Vec::new()));
         let (jwks_tx, _) = watch::channel(Arc::new(JwkSet { keys: Vec::new() }));
+        let (relay_tx, relay_rx) = if config.peers.relay_enabled && config.relay_coalesce_ms > 0 {
+            let (tx, rx) = tokio::sync::mpsc::channel(config.relay_queue_depth.max(1));
+            (Some(tx), Mutex::new(Some(rx)))
+        } else {
+            (None, Mutex::new(None))
+        };
         Ok(Self {
             inner: Arc::new(Inner {
                 config,
@@ -102,6 +116,8 @@ impl AppState {
                 sub_senders: DashMap::new(),
                 next_conn_id: AtomicU64::new(1),
                 metrics: Metrics::default(),
+                relay_tx,
+                relay_rx,
             }),
         })
     }
@@ -175,6 +191,19 @@ impl AppState {
     /// The shared relay HTTP client (per-relay timeout + optional TLS).
     pub fn relay_client(&self) -> &reqwest::Client {
         &self.inner.relay_client
+    }
+
+    /// Relay-coalescing sender (clone per enqueue). `None` ⇒ coalescing
+    /// disabled (or peer-relay off) — caller falls back to direct relay.
+    pub fn relay_tx(&self) -> Option<tokio::sync::mpsc::Sender<RelayBatch>> {
+        self.inner.relay_tx.clone()
+    }
+
+    /// Take the relay-coalescing receiver. Returns `Some` at most once
+    /// (the flush-task spawner owns it); `None` thereafter or when
+    /// coalescing is disabled.
+    pub fn take_relay_rx(&self) -> Option<tokio::sync::mpsc::Receiver<RelayBatch>> {
+        self.inner.relay_rx.lock().expect("relay_rx mutex").take()
     }
 
     /// Load the manifest from `path` and swap it in. Returns the stream
@@ -336,6 +365,24 @@ mod tests {
         state.remove_connection(1);
         assert!(state.control_sender(1).is_none());
         assert!(state.sub_sender(1, "s2").is_none());
+    }
+
+    #[test]
+    fn relay_channel_absent_when_coalescing_off() {
+        let state = AppState::new(cfg()); // cfg() has relay_coalesce_ms: 0
+        assert!(state.relay_tx().is_none());
+        assert!(state.take_relay_rx().is_none());
+    }
+
+    #[test]
+    fn relay_channel_present_when_coalescing_on_and_rx_taken_once() {
+        let mut c = cfg();
+        c.relay_coalesce_ms = 10;
+        // cfg()'s PeerConfig::default() has relay_enabled = true.
+        let state = AppState::new(c);
+        assert!(state.relay_tx().is_some());
+        assert!(state.take_relay_rx().is_some(), "rx available once");
+        assert!(state.take_relay_rx().is_none(), "rx taken only once");
     }
 
     #[test]
