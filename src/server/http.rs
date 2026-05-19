@@ -6,20 +6,11 @@ use axum::Json;
 use serde_json::Value;
 
 use crate::config::Config;
-use crate::dispatcher::dispatch;
+use crate::dispatcher::{dispatch, EventOrigin};
 use crate::envelope::{EnvelopePaths, EventEnvelope};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
 use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
-
-/// Where a batch of events entered the process. A producer push is
-/// relayed once to peers; a peer relay receipt is **not** (the distinct
-/// path is the one-hop loop guard).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Origin {
-    Producer,
-    Peer,
-}
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let body = state.metrics().encode();
@@ -49,7 +40,7 @@ fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
 fn accept_events(
     state: &AppState,
     events: Vec<EventEnvelope>,
-    origin: Origin,
+    origin: EventOrigin,
 ) -> Result<(), (StatusCode, &'static str)> {
     let manifest = state
         .manifest()
@@ -83,12 +74,12 @@ fn accept_events(
 
     // Capture the canonical batch for relay before the dispatch loop
     // consumes it (only when this is a producer push).
-    let relay_batch = (origin == Origin::Producer).then(|| RelayBatch {
+    let relay_batch = (origin == EventOrigin::Producer).then(|| RelayBatch {
         events: events.clone(),
     });
 
     for envelope in events {
-        dispatch(state, envelope);
+        dispatch(state, envelope, origin);
     }
 
     if let Some(batch) = relay_batch {
@@ -108,7 +99,7 @@ pub async fn push_event(
     let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    accept_events(&state, vec![envelope], Origin::Producer)?;
+    accept_events(&state, vec![envelope], EventOrigin::Producer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -139,7 +130,7 @@ pub async fn push_batch(
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed, Origin::Producer)?;
+    accept_events(&state, parsed, EventOrigin::Producer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -159,7 +150,7 @@ pub async fn relay_receive(
     let batch: RelayBatch = ciborium::from_reader(body.as_ref())
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR relay body"))?;
 
-    accept_events(&state, batch.events, Origin::Peer)?;
+    accept_events(&state, batch.events, EventOrigin::Peer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

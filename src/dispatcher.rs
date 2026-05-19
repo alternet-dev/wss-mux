@@ -4,6 +4,16 @@ use crate::error::ProtocolError;
 use crate::server::metrics::{DropReason, DropReasonLabel, StreamLabel};
 use crate::server::AppState;
 
+/// Where an event entered the process. Producer pushes are relayed to
+/// peers; peer relay receipts are not (the one-hop guard). Used so a
+/// relayed event that matches no local subscription is metered as
+/// cross-instance waste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventOrigin {
+    Producer,
+    Peer,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchStats {
     pub delivered: usize,
@@ -18,7 +28,7 @@ pub struct DispatchStats {
 /// accounting. A full per-sub channel is that subscription overflowing
 /// on its own; the connection and its other subscriptions are
 /// untouched.
-pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
+pub fn dispatch(state: &AppState, envelope: EventEnvelope, origin: EventOrigin) -> DispatchStats {
     let mut stats = DispatchStats::default();
     let matches = state
         .registry()
@@ -32,6 +42,9 @@ pub fn dispatch(state: &AppState, envelope: EventEnvelope) -> DispatchStats {
                 reason: DropReason::NoSubscribers,
             })
             .inc();
+        if origin == EventOrigin::Peer {
+            state.metrics().relay_events_unwanted.inc();
+        }
         return stats;
     }
 
@@ -196,12 +209,34 @@ mod tests {
     #[test]
     fn no_subscribers_increments_dropped_metric() {
         let state = AppState::new(test_config(8));
-        let stats = dispatch(&state, env("chat_messages"));
+        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
         assert_eq!(stats.delivered, 0);
         let body = state.metrics().encode();
         assert!(
             body.contains("wss_mux_events_dropped_total{reason=\"no_subscribers\"} 1"),
             "expected no_subscribers drop in metrics body, got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn peer_origin_no_subscribers_is_metered_as_unwanted() {
+        let state = AppState::new(test_config(8));
+        let _ = dispatch(&state, env("chat_messages"), EventOrigin::Peer);
+        let body = state.metrics().encode();
+        assert!(
+            body.contains("wss_mux_relay_events_unwanted_total 1"),
+            "expected peer-origin unwanted relay metered, got:\n{body}"
+        );
+    }
+
+    #[test]
+    fn producer_origin_no_subscribers_does_not_count_as_unwanted() {
+        let state = AppState::new(test_config(8));
+        let _ = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+        let body = state.metrics().encode();
+        assert!(
+            !body.contains("wss_mux_relay_events_unwanted_total 1"),
+            "producer-origin no-subscriber must NOT be an unwanted relay"
         );
     }
 
@@ -217,6 +252,7 @@ mod tests {
                 key: None,
                 payload: json!({"hello": "world"}),
             },
+            EventOrigin::Producer,
         );
 
         assert_eq!(stats.delivered, 1);
@@ -234,7 +270,7 @@ mod tests {
         let rx = subscribe(&state, 7, "s1", "chat_messages", 8);
         drop(rx); // writer side gone
 
-        let stats = dispatch(&state, env("chat_messages"));
+        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
         assert_eq!(stats.dropped_closed, 1);
         // Stale sender pruned; binding cleaned.
         assert!(state.sub_sender(7, "s1").is_none());
@@ -254,10 +290,10 @@ mod tests {
         let mut rx2 = subscribe(&state, 1, "s2", "other", 8);
 
         for _ in 0..2 {
-            dispatch(&state, env("chat_messages"));
+            dispatch(&state, env("chat_messages"), EventOrigin::Producer);
         }
         // 3rd: s1 channel is full → per-sub overflow.
-        let stats = dispatch(&state, env("chat_messages"));
+        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
         assert_eq!(stats.dropped_full, 1);
         assert_eq!(stats.delivered, 0);
 
@@ -265,7 +301,7 @@ mod tests {
         assert!(state.control_sender(1).is_some());
         assert!(state.sub_sender(1, "s1").is_none());
         assert!(state.registry().matches("chat_messages", None).is_empty());
-        dispatch(&state, env("other"));
+        dispatch(&state, env("other"), EventOrigin::Producer);
         assert_eq!(rx2.try_drain().len(), 1, "s2 keeps delivering");
 
         // Client got a keep-open overflow error for s1 on the control
@@ -291,6 +327,7 @@ mod tests {
                     key: None,
                     payload: json!({ "i": i }),
                 },
+                EventOrigin::Producer,
             );
             assert_eq!(s.delivered, 1);
             assert_eq!(s.dropped_full, 0);
