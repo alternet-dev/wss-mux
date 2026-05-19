@@ -167,7 +167,16 @@ occupancy is near zero outside fanout bursts.
   instance relays a producer push once to its DNS-discovered peers so
   each fans out to its own clients — best-effort, one-hop, no gossip,
   no shared state. Resolving no peers ⇒ inert (single-instance
-  behaviour). See `docs/operations.md`.
+  behaviour). In v0.5 the relay can optionally coalesce:
+  `WSS_MUX_RELAY_COALESCE_MS > 0` batches per-push relays through a
+  bounded queue drained by a single **supervised** flush task (a
+  panic is metered `wss_mux_relay_flush_restarts_total` and the task
+  restarts), POSTing peers concurrently; `0` / no peers ⇒ inert. The
+  flush SPOF is bounded to multi-instance deployments only. Fleet
+  stream-sparsity is observable as
+  `wss_mux_relay_events_unwanted_total` (peer-origin events with no
+  local subscriber) over `wss_mux_relay_events_relayed_total`. See
+  `docs/operations.md`.
 - **Token issuance.** Only validation.
 - **Producer adapters.** No Kafka consumer, no Redis subscriber.
 - **TLS termination.** Client-edge TLS is done at the reverse proxy
