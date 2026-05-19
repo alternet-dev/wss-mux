@@ -1,10 +1,11 @@
 //! OIDC JWKS fetch + discovery.
 //!
-//! PR1 scope: resolve the JWKS endpoint (explicit override or OIDC
-//! discovery from `<issuer>/.well-known/openid-configuration`), fetch
-//! it, parse a [`JwkSet`]. Token validation against the set lands in
-//! PR2. JSON is parsed with `serde_json` over raw bytes so no
-//! `reqwest` `json` feature is needed.
+//! Resolves the JWKS endpoint — the explicit `WSS_MUX_OIDC_JWKS_URL`
+//! override, else OIDC discovery from
+//! `<issuer>/.well-known/openid-configuration` — then fetches and
+//! parses the [`JwkSet`]. Token validation against the set lives in
+//! [`crate::auth`] (`OidcVerifier`). JSON is parsed with `serde_json`
+//! over raw bytes so no `reqwest` `json` feature is needed.
 
 use jsonwebtoken::jwk::JwkSet;
 use serde::Deserialize;
