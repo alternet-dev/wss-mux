@@ -1,5 +1,6 @@
 pub mod http;
 pub mod metrics;
+pub mod relay;
 pub mod ws;
 
 use self::metrics::Metrics;
