@@ -135,6 +135,10 @@ pub struct Metrics {
     pub subscriptions_revoked: Family<RevokeReasonLabel, Counter>,
     pub frames_rate_limited: Counter,
     pub relay_sent: Counter,
+    /// Relayed (peer-origin) events that matched no local subscription
+    /// — the cross-instance-waste / stream-sparsity signal that gates
+    /// the deferred Selective Relay.
+    pub relay_events_unwanted: Counter,
     pub relay_failed: Family<RelayFailureLabel, Counter>,
     pub peers_known: Gauge,
     pub events_rejected: Family<RejectReasonLabel, Counter>,
@@ -159,6 +163,7 @@ impl Default for Metrics {
         let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
         let frames_rate_limited = Counter::default();
         let relay_sent = Counter::default();
+        let relay_events_unwanted = Counter::default();
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
         let peers_known = Gauge::default();
         let events_rejected = Family::<RejectReasonLabel, Counter>::default();
@@ -216,6 +221,11 @@ impl Default for Metrics {
             relay_sent.clone(),
         );
         registry.register(
+            "wss_mux_relay_events_unwanted",
+            "Relayed (peer-origin) events that matched no local subscription",
+            relay_events_unwanted.clone(),
+        );
+        registry.register(
             "wss_mux_relay_failed",
             "Peer-relay deliveries that failed, labeled by reason",
             relay_failed.clone(),
@@ -253,6 +263,7 @@ impl Default for Metrics {
             subscriptions_revoked,
             frames_rate_limited,
             relay_sent,
+            relay_events_unwanted,
             relay_failed,
             peers_known,
             events_rejected,
