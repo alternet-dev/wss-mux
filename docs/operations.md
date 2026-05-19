@@ -182,10 +182,10 @@ both relays to and receives relays from the rest of the fleet.
 ### Scale-down and reconnection
 
 When a pod terminates, its WebSocket connections drop. Subscriptions
-are **ephemeral** — there is no server-side persistence (durable
-subscriptions are a v0.5 roadmap item). Clients must reconnect
-(ideally with jittered backoff) and re-send their `auth` +
-`subscribe` frames. Plan for reconnect storms on rolling restarts;
+are **ephemeral** — there is no server-side persistence (by design;
+durability is the producer's responsibility, see `docs/concepts.md`).
+Clients must reconnect (ideally with jittered backoff) and re-send
+their `auth` + `subscribe` frames. Plan for reconnect storms on rolling restarts;
 make sure your client library re-subscribes automatically.
 
 A terminating pod may linger in peers' sets for up to one refresh
@@ -209,6 +209,22 @@ Lower the interval for a tighter window at the cost of more (cached,
 cheap) DNS queries; raise it to reduce queries at the cost of a wider
 window. Per-relay delivery failure is *not* polled — it is handled
 inline per request.
+
+### Relay coalescing (event-volume ceiling)
+
+Every instance processes every relayed event, so event-ingest
+throughput does not scale horizontally. `WSS_MUX_RELAY_COALESCE_MS`
+(default `0` = off) batches the per-push peer relay over a short
+window; `WSS_MUX_RELAY_COALESCE_MAX_EVENTS` caps events per POST (and
+bounds loss if a relay POST fails); `WSS_MUX_RELAY_QUEUE_DEPTH` bounds
+the in-process queue (full ⇒ batches dropped, metered
+`wss_mux_relay_queue_dropped_total`, never producer backpressure). The
+flush task is supervised — a panic is metered
+`wss_mux_relay_flush_restarts_total` and the task restarts. Watch
+`wss_mux_relay_events_unwanted_total` ÷
+`wss_mux_relay_events_relayed_total`: a high ratio means most relayed
+events have no local subscriber (stream-sparse fleet) and selective
+relay would help.
 
 ## Non-Kubernetes / fixed fleet
 
@@ -240,8 +256,9 @@ cross-instance fanout. It was rejected:
   no failover semantics to reason about.
 
 State replication beyond this optional event relay remains an explicit
-non-goal. Durable subscriptions (surviving restarts) are a separate,
-opt-in v0.5 item.
+non-goal. Durable subscriptions are **not** on the roadmap — they
+contradict the stateless, ephemeral identity; durability is the
+producer's responsibility (see `docs/concepts.md`).
 
 ## Observability
 
