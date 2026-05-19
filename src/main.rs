@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
     spawn_sighup_reloader(state.clone());
     spawn_peer_refresher(state.clone());
     spawn_oidc_jwks_refresher(state.clone());
+    wss_mux::server::relay::spawn_relay_flusher(state.clone());
 
     let listener = TcpListener::bind(state.config().listen_addr).await?;
     tracing::info!(addr = %listener.local_addr()?, "wss-mux listening");
