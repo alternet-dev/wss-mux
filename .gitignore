@@ -6,3 +6,5 @@
 .env
 .env.*
 !.env.example
+# AI design/plan scratch — never committed (per project convention).
+/.superpowers/

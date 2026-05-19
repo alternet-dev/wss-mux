@@ -42,6 +42,11 @@ pub fn test_config() -> Config {
         // aren't throttled; the rate-limit suite builds its own config.
         inbound_rate_per_sec: 0,
         inbound_burst: 0,
+        // Coalescing off by default in tests ⇒ relay path byte-identical
+        // to pre-v0.5; the coalescing suite builds its own config.
+        relay_coalesce_ms: 0,
+        relay_coalesce_max_events: 1024,
+        relay_queue_depth: 1024,
         // Peer relay defaults are inert in-test (no resolvable peers),
         // keeping every existing suite byte-identical to single-instance.
         peers: wss_mux::config::PeerConfig::default(),

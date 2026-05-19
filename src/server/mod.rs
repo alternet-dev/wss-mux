@@ -1,5 +1,6 @@
 pub mod http;
 pub mod metrics;
+pub mod relay;
 pub mod ws;
 
 use self::metrics::Metrics;
@@ -303,6 +304,9 @@ mod tests {
             envelope_payload_path: "payload".into(),
             inbound_rate_per_sec: 0,
             inbound_burst: 0,
+            relay_coalesce_ms: 0,
+            relay_coalesce_max_events: 1024,
+            relay_queue_depth: 1024,
             peers: crate::config::PeerConfig::default(),
         }
     }

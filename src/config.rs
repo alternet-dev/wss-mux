@@ -17,6 +17,9 @@ pub const DEFAULT_ENVELOPE_KEY_PATH: &str = "key";
 pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
 pub const DEFAULT_INBOUND_RATE: u32 = 50;
 pub const DEFAULT_INBOUND_BURST: u32 = 100;
+pub const DEFAULT_RELAY_COALESCE_MS: u64 = 0;
+pub const DEFAULT_RELAY_COALESCE_MAX_EVENTS: usize = 1024;
+pub const DEFAULT_RELAY_QUEUE_DEPTH: usize = 1024;
 pub const DEFAULT_OIDC_GROUPS_CLAIM: &str = "groups";
 pub const DEFAULT_OIDC_JWKS_REFRESH_SECS: u64 = 300;
 
@@ -85,6 +88,18 @@ pub struct Config {
     /// Token-bucket capacity — the largest instantaneous burst allowed
     /// before the steady rate applies.
     pub inbound_burst: u32,
+    /// Relay coalescing flush window (ms). `0` (default) disables
+    /// coalescing entirely → relay is spawned per producer push,
+    /// byte-identical to pre-v0.5. `>0` batches relayed events.
+    pub relay_coalesce_ms: u64,
+    /// Max events per coalesced relay POST — the size-based flush
+    /// trigger and the lost-POST blast-radius bound. Only meaningful
+    /// when `relay_coalesce_ms > 0`.
+    pub relay_coalesce_max_events: usize,
+    /// Bounded depth of the in-process relay-coalescing queue. Full ⇒
+    /// the enqueued batch is dropped + metered (never inward
+    /// backpressure). Only meaningful when `relay_coalesce_ms > 0`.
+    pub relay_queue_depth: usize,
     /// Cross-instance peer-relay discovery + transport settings.
     pub peers: PeerConfig,
 }
@@ -308,6 +323,24 @@ impl Config {
             None => None,
         };
 
+        let parse_usize = |var: &'static str, default: usize| -> Result<usize, ConfigError> {
+            match get(var) {
+                Some(v) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
+                    var,
+                    value: v.clone(),
+                    source,
+                }),
+                None => Ok(default),
+            }
+        };
+        let relay_coalesce_ms = parse_u64("WSS_MUX_RELAY_COALESCE_MS", DEFAULT_RELAY_COALESCE_MS)?;
+        let relay_coalesce_max_events = parse_usize(
+            "WSS_MUX_RELAY_COALESCE_MAX_EVENTS",
+            DEFAULT_RELAY_COALESCE_MAX_EVENTS,
+        )?;
+        let relay_queue_depth =
+            parse_usize("WSS_MUX_RELAY_QUEUE_DEPTH", DEFAULT_RELAY_QUEUE_DEPTH)?;
+
         let peers = PeerConfig {
             relay_enabled: match get("WSS_MUX_PEER_RELAY") {
                 Some(v) => !v.trim().eq_ignore_ascii_case("off"),
@@ -348,6 +381,9 @@ impl Config {
             envelope_payload_path,
             inbound_rate_per_sec,
             inbound_burst,
+            relay_coalesce_ms,
+            relay_coalesce_max_events,
+            relay_queue_depth,
             peers,
         })
     }
@@ -419,6 +455,40 @@ mod tests {
         let cfg = Config::from_getter(env(&pairs)).expect("config");
         assert_eq!(cfg.inbound_rate_per_sec, 0);
         assert_eq!(cfg.inbound_burst, 5);
+    }
+
+    #[test]
+    fn relay_coalesce_defaults_and_overrides() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert_eq!(cfg.relay_coalesce_ms, 0);
+        assert_eq!(
+            cfg.relay_coalesce_max_events,
+            DEFAULT_RELAY_COALESCE_MAX_EVENTS
+        );
+        assert_eq!(cfg.relay_queue_depth, DEFAULT_RELAY_QUEUE_DEPTH);
+
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_RELAY_COALESCE_MS", "25"));
+        pairs.push(("WSS_MUX_RELAY_COALESCE_MAX_EVENTS", "512"));
+        pairs.push(("WSS_MUX_RELAY_QUEUE_DEPTH", "4096"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.relay_coalesce_ms, 25);
+        assert_eq!(cfg.relay_coalesce_max_events, 512);
+        assert_eq!(cfg.relay_queue_depth, 4096);
+    }
+
+    #[test]
+    fn invalid_relay_coalesce_ms_is_error() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_RELAY_COALESCE_MS", "soon"));
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(
+            err,
+            ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_RELAY_COALESCE_MS",
+                ..
+            }
+        ));
     }
 
     #[test]
