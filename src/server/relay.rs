@@ -25,9 +25,24 @@ pub struct RelayBatch {
 pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
     let peers = state.peers();
     if peers.is_empty() {
+        return; // no peers ⇒ inert, byte-identical to single instance
+    }
+    state
+        .metrics()
+        .relay_events_relayed
+        .inc_by(batch.events.len() as u64);
+
+    if let Some(tx) = state.relay_tx() {
+        // Coalescing on: enqueue; the flush task batches + POSTs.
+        if tx.try_send(batch).is_err() {
+            // Queue full (or closed) ⇒ drop this batch + meter. Never
+            // inward backpressure (best-effort, at-most-once).
+            state.metrics().relay_queue_dropped.inc();
+        }
         return;
     }
 
+    // Coalescing off: pre-v0.5 direct per-push spawn (unchanged).
     let mut body = Vec::new();
     if ciborium::into_writer(&batch, &mut body).is_err() {
         state
@@ -88,6 +103,84 @@ pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::peers::{PeerUrl, Scheme};
+
+    fn coalescing_config() -> Config {
+        Config {
+            listen_addr: "127.0.0.1:0".parse().unwrap(),
+            push_auth_token: "t".into(),
+            handshake_keys: crate::config::HandshakeKeyConfig {
+                hs256_secret: Some("k".into()),
+                ed25519_public_pem: None,
+            },
+            oidc: None,
+            manifest_path: "p".into(),
+            queue_depth: 8,
+            envelope_stream_path: "stream".into(),
+            envelope_key_path: "key".into(),
+            envelope_payload_path: "payload".into(),
+            inbound_rate_per_sec: 0,
+            inbound_burst: 0,
+            relay_coalesce_ms: 10,
+            relay_coalesce_max_events: 1024,
+            relay_queue_depth: 4,
+            peers: crate::config::PeerConfig::default(),
+        }
+    }
+
+    fn a_peer() -> PeerUrl {
+        PeerUrl {
+            scheme: Scheme::Http,
+            host: "127.0.0.1".into(),
+            port: 9,
+        }
+    }
+
+    fn one_event_batch() -> RelayBatch {
+        RelayBatch {
+            events: vec![EventEnvelope {
+                stream: "s".into(),
+                key: None,
+                payload: serde_json::json!({}),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn enqueue_when_coalescing_on_and_peers_present() {
+        let state = AppState::new(coalescing_config());
+        let mut rx = state.take_relay_rx().expect("rx");
+        state.set_peers(vec![a_peer()]);
+        spawn_relay(&state, one_event_batch());
+        let got = rx.try_recv().expect("a batch was enqueued");
+        assert_eq!(got.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn no_peers_short_circuits_even_with_coalescing_on() {
+        let state = AppState::new(coalescing_config());
+        let mut rx = state.take_relay_rx().expect("rx");
+        // No peers ⇒ peers().is_empty() ⇒ nothing enqueued.
+        spawn_relay(&state, one_event_batch());
+        assert!(rx.try_recv().is_err(), "no peers ⇒ inert, nothing enqueued");
+    }
+
+    #[tokio::test]
+    async fn full_queue_drops_and_meters() {
+        let state = AppState::new(coalescing_config()); // relay_queue_depth: 4
+        let _rx = state.take_relay_rx().expect("rx"); // never drained
+        state.set_peers(vec![a_peer()]);
+        for _ in 0..10 {
+            spawn_relay(&state, one_event_batch());
+        }
+        let body = state.metrics().encode();
+        assert!(
+            body.contains("wss_mux_relay_queue_dropped_total")
+                && !body.contains("wss_mux_relay_queue_dropped_total 0"),
+            "expected non-zero queue-full drops metered, got:\n{body}"
+        );
+    }
 
     #[test]
     fn relay_batch_cbor_roundtrips() {
