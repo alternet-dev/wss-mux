@@ -147,8 +147,6 @@ pub struct Metrics {
     pub relay_queue_depth: Gauge,
     /// Relay batches dropped because the coalescing queue was full.
     pub relay_queue_dropped: Counter,
-    /// Relay flush-task supervised restarts (should stay 0).
-    pub relay_flush_restarts: Counter,
     pub relay_failed: Family<RelayFailureLabel, Counter>,
     pub peers_known: Gauge,
     pub events_rejected: Family<RejectReasonLabel, Counter>,
@@ -178,7 +176,6 @@ impl Default for Metrics {
         let relay_events_relayed = Counter::default();
         let relay_queue_depth = Gauge::default();
         let relay_queue_dropped = Counter::default();
-        let relay_flush_restarts = Counter::default();
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
         let peers_known = Gauge::default();
         let events_rejected = Family::<RejectReasonLabel, Counter>::default();
@@ -261,11 +258,6 @@ impl Default for Metrics {
             relay_queue_dropped.clone(),
         );
         registry.register(
-            "wss_mux_relay_flush_restarts",
-            "Relay flush-task supervised restarts (should stay 0)",
-            relay_flush_restarts.clone(),
-        );
-        registry.register(
             "wss_mux_relay_failed",
             "Peer-relay deliveries that failed, labeled by reason",
             relay_failed.clone(),
@@ -308,7 +300,6 @@ impl Default for Metrics {
             relay_events_relayed,
             relay_queue_depth,
             relay_queue_dropped,
-            relay_flush_restarts,
             relay_failed,
             peers_known,
             events_rejected,
@@ -338,14 +329,12 @@ mod tests {
         m.relay_events_relayed.inc_by(3);
         m.relay_queue_depth.set(7);
         m.relay_queue_dropped.inc();
-        m.relay_flush_restarts.inc();
         let body = m.encode();
         for needle in [
             "wss_mux_relay_flushes_total 1",
             "wss_mux_relay_events_relayed_total 3",
             "wss_mux_relay_queue_depth 7",
             "wss_mux_relay_queue_dropped_total 1",
-            "wss_mux_relay_flush_restarts_total 1",
         ] {
             assert!(body.contains(needle), "missing {needle} in:\n{body}");
         }
