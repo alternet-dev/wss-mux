@@ -155,6 +155,9 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_PEER_CA_FILE` | — | private CA to trust for `https://` peers |
 | `WSS_MUX_PEER_CLIENT_CERT` | — | client certificate for peer mutual TLS |
 | `WSS_MUX_PEER_CLIENT_KEY` | — | client key for peer mutual TLS |
+| `WSS_MUX_RELAY_COALESCE_MS` | `0` | batch relayed events per peer over this window (ms); `0` = off (per-push relay, pre-v0.5 behaviour) |
+| `WSS_MUX_RELAY_COALESCE_MAX_EVENTS` | `1024` | max events per coalesced relay POST (size flush trigger + lost-POST blast-radius bound) |
+| `WSS_MUX_RELAY_QUEUE_DEPTH` | `1024` | bounded relay-coalescing queue; full ⇒ dropped + metered, never producer backpressure |
 
 Operational notes:
 

@@ -100,8 +100,20 @@ Out of scope:
 
 ## v0.5
 
-- Subscription persistence (Redis-backed) for embedders that want
-  client subscriptions to survive `wss-mux` restarts.
+- **Relay coalescing.** When `WSS_MUX_RELAY_COALESCE_MS > 0`, an
+  instance batches relayed producer events per peer over that window
+  (or `WSS_MUX_RELAY_COALESCE_MAX_EVENTS`, whichever first) and POSTs
+  to peers concurrently, raising the per-instance event-volume ceiling.
+  `0` (default) or no peers ⇒ byte-identical to pre-v0.5.
+- **Ceiling telemetry.** `wss_mux_relay_events_unwanted_total`
+  (peer-origin events matching no local subscription — the
+  stream-sparsity signal), plus relay flush/queue counters.
+- *Subscription persistence was removed from the roadmap:* it
+  contradicts the stateless, non-persistent identity in
+  `docs/concepts.md`; durability remains the producer's responsibility.
+- *Designed but deferred (data-gated on the telemetry above):*
+  interest-based selective relay. *Future design consideration:* an
+  opt-in inbound overload signal.
 
 ## v1.0
 
