@@ -1,10 +1,7 @@
 //! Outbound peer-relay: the relay wire batch, the per-push relay
-//! decision, and (v0.5) the coalescing flush worker + supervisor.
-
-use std::panic::AssertUnwindSafe;
+//! decision, and (v0.5) the coalescing flush worker.
 
 use axum::http::header;
-use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -104,29 +101,19 @@ pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
     });
 }
 
-/// Spawn the supervised relay flush task. No-op if coalescing is off
-/// (rx absent). The supervisor catches a panic in the flush loop,
-/// meters `relay_flush_restarts`, and restarts — a dead flush task
-/// would silently stop cross-instance relay fleet-wide while local
-/// delivery still works (looks healthy → worse).
+/// Spawn the relay flush task. No-op if coalescing is off (rx
+/// absent). The loop body is panic-free by construction (every
+/// network/encode error is metered, no `unwrap`s on the hot path),
+/// so no in-process supervisor is needed. If the task does ever die,
+/// `Sender::try_send` will return `Closed` for every subsequent
+/// producer push — `relay_queue_dropped_total` climbs and
+/// `relay_sent_total` flatlines, which is the operator-visible signal.
 pub fn spawn_relay_flusher(state: AppState) {
     let Some(mut rx) = state.take_relay_rx() else {
         return;
     };
     tokio::spawn(async move {
-        loop {
-            let outcome = AssertUnwindSafe(relay_flush_loop(&state, &mut rx))
-                .catch_unwind()
-                .await;
-            match outcome {
-                Ok(()) => break, // channel closed → process shutdown
-                Err(_) => {
-                    state.metrics().relay_flush_restarts.inc();
-                    tracing::error!("relay flush loop panicked; restarting");
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-            }
-        }
+        relay_flush_loop(&state, &mut rx).await;
     });
 }
 
