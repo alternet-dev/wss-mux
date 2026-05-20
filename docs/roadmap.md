@@ -100,14 +100,17 @@ Out of scope:
 
 ## v0.5
 
-- **Relay coalescing.** When `WSS_MUX_RELAY_COALESCE_MS > 0`, an
-  instance batches relayed producer events per peer over that window
-  (or `WSS_MUX_RELAY_COALESCE_MAX_EVENTS`, whichever first) and POSTs
-  to peers concurrently, raising the per-instance event-volume ceiling.
+- ~~Relay coalescing.~~ Shipped (#36 config + relay module
+  extraction, #38 mechanism, #40 supervisor cleanup). When
+  `WSS_MUX_RELAY_COALESCE_MS > 0`, an instance batches relayed
+  producer events per peer over that window (or
+  `WSS_MUX_RELAY_COALESCE_MAX_EVENTS`, whichever first) and POSTs to
+  peers concurrently, raising the per-instance event-volume ceiling.
   `0` (default) or no peers ⇒ byte-identical to pre-v0.5.
-- **Ceiling telemetry.** `wss_mux_relay_events_unwanted_total`
-  (peer-origin events matching no local subscription — the
-  stream-sparsity signal), plus relay flush/queue counters.
+- ~~Ceiling telemetry.~~ Shipped (#37).
+  `wss_mux_relay_events_unwanted_total` (peer-origin events matching
+  no local subscription — the stream-sparsity signal), plus relay
+  flush/queue counters.
 - *Subscription persistence was removed from the roadmap:* it
   contradicts the stateless, non-persistent identity in
   `docs/concepts.md`; durability remains the producer's responsibility.
