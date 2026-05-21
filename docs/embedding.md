@@ -354,39 +354,19 @@ This is the right starting point for most deployments.
 
 ### Multi-instance
 
-Multiple `wss-mux` processes, each with their own connected clients.
-Each event must reach every instance — the producer broadcasts.
+Multiple `wss-mux` processes, each with its own connected clients. The
+producer still pushes each event **once**, to any single instance:
+that instance dispatches to its own subscribers and relays the event
+to its discovered peers, so clients on every instance see it. This is
+**peer-relay** — built in, no producer-side broadcast, no external
+infrastructure. The producer contract is identical to the
+single-instance case.
 
-Discovery is your choice; common patterns:
-
-- **DNS-based**: deploy `wss-mux` behind a headless DNS record.
-  Producer resolves the name to a list of IPs and pushes to each.
-- **Service mesh**: configure the mesh to fan-out producer pushes to
-  all `wss-mux` endpoints.
-- **Static list**: configure the producer with a list of instance
-  URLs.
-- **Sidecar-per-producer-pod**: each producer instance runs a local
-  `wss-mux` sidecar. Producer pushes to `localhost`. Clients hit any
-  pod via the load balancer; cross-pod event delivery requires
-  producer-to-producer broadcast (out of scope for `wss-mux` to
-  solve).
-
-`wss-mux` doesn't pick for you because the right answer depends on
-your environment. The OSS roadmap (v0.3) plans an optional Redis
-pubsub adapter to reduce broadcast amplification when N gets large.
-
-### Producer-pod count vs `wss-mux`-pod count
-
-For M producer pods and N `wss-mux` pods, each event is M × N pushes
-in the worst case (every producer pushes every event to every
-`wss-mux`). At small scale (M, N ≤ 5) this is trivial. At large
-scale, consider:
-
-- Reducing N via vertical scaling (one big `wss-mux` is usually fine
-  up to ~100k connections).
-- Using the v0.3 pubsub adapter (producer pushes once to Redis; all
-  `wss-mux` instances subscribe).
-- A producer-side fanout daemon that absorbs `M-fold` amplification.
+Running a fleet is therefore an operations concern, not an embedding
+one. [docs/operations.md](operations.md) covers it end to end:
+peer-relay, the zero-config Kubernetes deployment, discovery and TLS
+knobs, autoscaling, the non-Kubernetes fixed-fleet setup, and the
+event-volume ceiling.
 
 ## Connection rate limiting
 
