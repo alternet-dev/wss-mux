@@ -12,12 +12,20 @@ use wss_mux::manifest::Manifest;
 use wss_mux::peers::{PeerUrl, Scheme};
 use wss_mux::server::{build_app, AppState};
 
-/// Manifest every in-process instance is brought up with: one `loadgen`
-/// stream with a `["*"]` audience, so any minted token may subscribe.
+/// Manifest every in-process instance is brought up with. All streams
+/// carry a `["*"]` audience, so any minted token may subscribe.
+/// `loadgen_slow` has a tiny send queue (slow-consumer scenario);
+/// `loadgen_capped` carries a payload cap (payload-cap scenario).
 pub const LOADGEN_MANIFEST: &str = r#"version: 1
 streams:
   - stream: loadgen
     audience: ["*"]
+  - stream: loadgen_slow
+    audience: ["*"]
+    queue_depth: 8
+  - stream: loadgen_capped
+    audience: ["*"]
+    max_payload_bytes: 256
 "#;
 
 /// One reachable wss-mux instance.
@@ -199,5 +207,89 @@ async fn start_fleet(count: usize, signing_key: &str, push_token: &str) -> Resul
         instances,
         mode: "in-process",
         _servers: servers,
+    })
+}
+
+/// Per-scenario knobs for a single profiled in-process instance — the
+/// traffic-oddity scenarios each request the variant they need.
+pub struct ServerProfile {
+    /// Inbound frame rate limit `(per_sec, burst)`; `(0, 0)` ⇒ off.
+    pub rate_limit: (u32, u32),
+    /// Relay coalescing window, ms; `0` ⇒ off (direct relay).
+    pub coalesce_ms: u64,
+    /// Bounded relay-coalescing queue depth.
+    pub relay_queue_depth: usize,
+    /// Configure one guaranteed-dead peer, so every relay fails fast.
+    pub dead_peer: bool,
+}
+
+impl Default for ServerProfile {
+    fn default() -> Self {
+        ServerProfile {
+            rate_limit: (0, 0),
+            coalesce_ms: 0,
+            relay_queue_depth: 1024,
+            dead_peer: false,
+        }
+    }
+}
+
+/// Spawn a single in-process wss-mux instance configured for a stress
+/// scenario, and return it as a one-instance `Target`.
+pub async fn start_profiled(
+    profile: ServerProfile,
+    signing_key: &str,
+    push_token: &str,
+) -> Result<Target> {
+    let mut config = Config::new(
+        push_token.to_string(),
+        HandshakeKeyConfig {
+            hs256_secret: Some(signing_key.to_string()),
+            ed25519_public_pem: None,
+        },
+        PathBuf::from("loadgen.yaml"),
+    );
+    config.inbound_rate_per_sec = profile.rate_limit.0;
+    config.inbound_burst = profile.rate_limit.1;
+    config.relay_coalesce_ms = profile.coalesce_ms;
+    config.relay_queue_depth = profile.relay_queue_depth.max(1);
+
+    let state = AppState::try_new(config).context("build profiled AppState")?;
+    let manifest = Manifest::from_str(LOADGEN_MANIFEST, Path::new("loadgen.yaml"))
+        .context("parse the loadgen manifest")?;
+    state.set_manifest(manifest);
+
+    if profile.dead_peer {
+        // Bind then drop a port: connections to it are refused fast.
+        let dead = TcpListener::bind("127.0.0.1:0")
+            .await
+            .context("bind a port for the dead peer")?;
+        let dead_addr = dead.local_addr().context("read dead peer addr")?;
+        drop(dead);
+        state.set_peers(vec![PeerUrl {
+            scheme: Scheme::Http,
+            host: dead_addr.ip().to_string(),
+            port: dead_addr.port(),
+        }]);
+    }
+
+    if profile.coalesce_ms > 0 {
+        wss_mux::server::relay::spawn_relay_flusher(state.clone());
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("bind the profiled instance")?;
+    let addr = listener.local_addr().context("read profiled addr")?;
+    let server = tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, build_app(state)).await {
+            tracing::error!(error = %e, "profiled wss-mux instance exited");
+        }
+    });
+
+    Ok(Target {
+        instances: vec![Instance::in_process(addr)],
+        mode: "in-process",
+        _servers: vec![server],
     })
 }

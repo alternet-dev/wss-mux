@@ -77,8 +77,9 @@ pub async fn auth_and_subscribe(
 pub enum Recv {
     /// An `event` frame was delivered.
     Event(ServerFrame),
-    /// An `error` frame was delivered (e.g. failed auth, overflow).
-    Error,
+    /// An `error` frame was delivered — `code` is the wire error code
+    /// (e.g. `overflow`, `rate_limited`).
+    Error { code: String },
     /// The wait timed out with nothing delivered.
     Idle,
     /// The socket closed or the stream ended.
@@ -98,7 +99,7 @@ pub async fn next(ws: &mut Ws, timeout: Duration) -> Result<Recv> {
             WsMessage::Text(text) => {
                 match serde_json::from_str::<ServerFrame>(&text).context("parse server frame")? {
                     frame @ ServerFrame::Event { .. } => Recv::Event(frame),
-                    ServerFrame::Error { .. } => Recv::Error,
+                    ServerFrame::Error { code, .. } => Recv::Error { code },
                 }
             }
             WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Frame(_) => continue,

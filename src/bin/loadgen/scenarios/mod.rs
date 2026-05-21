@@ -1,14 +1,34 @@
 //! Load and stress scenarios, plus the helpers they share.
 
+pub mod coalesce_saturate;
 pub mod connections;
+pub mod dead_peer;
 pub mod latency;
+pub mod payload_cap;
+pub mod rate_limit;
+pub mod reconnect_storm;
+pub mod slow_consumer;
 pub mod throughput;
 
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 
+use crate::cli::Cli;
 use crate::metrics;
+use crate::report::RunMeta;
+
+/// `RunMeta` for an in-process traffic-oddity scenario — topology and
+/// peer count do not apply, so they carry their inert defaults.
+pub fn oddity_meta(cli: &Cli, scenario: &str) -> RunMeta {
+    RunMeta {
+        scenario: scenario.to_string(),
+        mode: "in-process".to_string(),
+        topology: cli.topology.as_str().to_string(),
+        peers: 0,
+        duration_secs: cli.duration,
+    }
+}
 
 /// Poll the fleet's `/metrics` until `wss_mux_subscriptions_active`,
 /// summed across `bases`, reaches `expected`, or fail after ~10s. The
