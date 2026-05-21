@@ -422,3 +422,10 @@ and `BURST` to the largest legitimate reconnect-resubscribe spike.
   once.** If you need at-least-once, dual-write: persist to a
   durable log and push to `wss-mux`. The durable log feeds
   reconciliation; `wss-mux` provides the live feed.
+
+## Traffic anomalies
+
+How `wss-mux` degrades under slow consumers, oversized payloads,
+inbound floods, reconnect storms, and dead peers — what you observe and
+the embedder-side fix for each — is documented in the traffic-oddities
+runbook in [docs/operations.md](operations.md).
