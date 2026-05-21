@@ -1,6 +1,6 @@
 //! Result types: `Serialize` for `--json`, `Display` for the human
 //! report. Every result carries a `RunMeta` header so a number is never
-//! read without its mode and window.
+//! read without its mode, topology, and window.
 
 use std::fmt;
 
@@ -12,6 +12,10 @@ pub struct RunMeta {
     pub scenario: String,
     /// `in-process` or `external`.
     pub mode: String,
+    /// The named traffic topology — `broadcast` / `concentrated` / `keyed`.
+    pub topology: String,
+    /// Peer instances beyond the ingress (`0` ⇒ single instance).
+    pub peers: usize,
     pub duration_secs: u64,
 }
 
@@ -60,6 +64,55 @@ impl fmt::Display for Percentiles {
     }
 }
 
+/// Cross-instance relay outcome — present only for a fleet run
+/// (`peers > 0`).
+#[derive(Debug, Serialize)]
+pub struct RelayStats {
+    /// Events handed to the peer-relay path (fleet-summed delta).
+    pub events_relayed: u64,
+    /// Successful per-peer relay POSTs (fleet-summed delta).
+    pub peer_sends: u64,
+    /// Relayed events that matched no local subscription anywhere in the
+    /// fleet (fleet-summed delta).
+    pub events_unwanted: u64,
+    /// `events_unwanted ÷ events_relayed` — the cross-instance-waste
+    /// ratio that gates the deferred selective-relay work. `0.0` ⇒ every
+    /// relayed event was wanted somewhere.
+    pub waste_ratio: f64,
+}
+
+impl RelayStats {
+    /// Build from fleet-summed counter deltas.
+    pub fn new(events_relayed: u64, peer_sends: u64, events_unwanted: u64) -> Self {
+        let waste_ratio = if events_relayed == 0 {
+            0.0
+        } else {
+            events_unwanted as f64 / events_relayed as f64
+        };
+        Self {
+            events_relayed,
+            peer_sends,
+            events_unwanted,
+            waste_ratio,
+        }
+    }
+}
+
+impl fmt::Display for RelayStats {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "  relay:             relayed={}  peer-sends={}  unwanted={}",
+            self.events_relayed, self.peer_sends, self.events_unwanted
+        )?;
+        write!(
+            f,
+            "  relay waste:       {:.2}  (unwanted ÷ relayed — selective-relay signal)",
+            self.waste_ratio
+        )
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ThroughputReport {
     pub meta: RunMeta,
@@ -69,11 +122,16 @@ pub struct ThroughputReport {
     pub pushes_failed: u64,
     pub push_rate_per_sec: f64,
     /// `wss_mux_events_dispatched_total` delta — per-subscription
-    /// deliveries, so ≈ `pushes_ok × subscribers` when nothing drops.
+    /// deliveries fleet-wide.
     pub events_delivered: u64,
     pub delivery_rate_per_sec: f64,
-    pub events_dropped: u64,
+    /// `wss_mux_events_dropped_total{reason="overflow"}` delta — a
+    /// subscriber that could not keep up with the dispatch rate.
+    pub overflow_drops: u64,
     pub push_latency_ms: Percentiles,
+    /// Cross-instance relay outcome — `Some` only for a fleet run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay: Option<RelayStats>,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,6 +141,9 @@ pub struct LatencyReport {
     pub interval_ms: u64,
     pub samples: usize,
     pub delivery_latency_ms: Percentiles,
+    /// Cross-instance relay outcome — `Some` only for a fleet run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relay: Option<RelayStats>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,8 +182,13 @@ impl fmt::Display for ThroughputReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "throughput  (mode: {}, {}s, {} subscribers, {} producers)",
-            self.meta.mode, self.meta.duration_secs, self.subscribers, self.producers
+            "throughput  (mode: {}, topology: {}, peers: {}, {}s, {} subscribers, {} producers)",
+            self.meta.mode,
+            self.meta.topology,
+            self.meta.peers,
+            self.meta.duration_secs,
+            self.subscribers,
+            self.producers
         )?;
         writeln!(
             f,
@@ -134,8 +200,12 @@ impl fmt::Display for ThroughputReport {
             "  deliveries:        {}  ({:.0}/s fan-out)",
             self.events_delivered, self.delivery_rate_per_sec
         )?;
-        writeln!(f, "  events dropped:    {}", self.events_dropped)?;
-        write!(f, "  push latency (ms): {}", self.push_latency_ms)
+        writeln!(f, "  overflow drops:    {}", self.overflow_drops)?;
+        write!(f, "  push latency (ms): {}", self.push_latency_ms)?;
+        if let Some(relay) = &self.relay {
+            write!(f, "\n{relay}")?;
+        }
+        Ok(())
     }
 }
 
@@ -143,11 +213,20 @@ impl fmt::Display for LatencyReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "latency  (mode: {}, {}s, {} subscribers, {}ms interval)",
-            self.meta.mode, self.meta.duration_secs, self.subscribers, self.interval_ms
+            "latency  (mode: {}, topology: {}, peers: {}, {}s, {} subscribers, {}ms interval)",
+            self.meta.mode,
+            self.meta.topology,
+            self.meta.peers,
+            self.meta.duration_secs,
+            self.subscribers,
+            self.interval_ms
         )?;
         writeln!(f, "  samples:               {}", self.samples)?;
-        write!(f, "  delivery latency (ms): {}", self.delivery_latency_ms)
+        write!(f, "  delivery latency (ms): {}", self.delivery_latency_ms)?;
+        if let Some(relay) = &self.relay {
+            write!(f, "\n{relay}")?;
+        }
+        Ok(())
     }
 }
 
@@ -195,5 +274,13 @@ mod tests {
     fn percentiles_of_a_single_sample() {
         let p = Percentiles::from_millis(vec![7.5]);
         assert_eq!((p.p50, p.p90, p.p99, p.max), (7.5, 7.5, 7.5, 7.5));
+    }
+
+    #[test]
+    fn relay_waste_ratio_is_unwanted_over_relayed() {
+        let r = RelayStats::new(100, 300, 200);
+        assert_eq!(r.waste_ratio, 2.0);
+        // No relay traffic ⇒ ratio is zero, not a division by zero.
+        assert_eq!(RelayStats::new(0, 0, 0).waste_ratio, 0.0);
     }
 }

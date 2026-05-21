@@ -43,14 +43,16 @@ pub async fn send_frame(ws: &mut Ws, frame: &ClientFrame) -> Result<()> {
     Ok(())
 }
 
-/// Authenticate, then subscribe to `stream` (no key) under `sub_id`.
-/// Neither frame is acknowledged by the server; readiness is confirmed
-/// out of band by polling `wss_mux_subscriptions_active`.
+/// Authenticate, then subscribe to `stream` under `sub_id`, optionally
+/// narrowed to `key`. Neither frame is acknowledged by the server;
+/// readiness is confirmed out of band by polling
+/// `wss_mux_subscriptions_active`.
 pub async fn auth_and_subscribe(
     ws: &mut Ws,
     token: &str,
     sub_id: &str,
     stream: &str,
+    key: Option<&str>,
 ) -> Result<()> {
     send_frame(
         ws,
@@ -64,7 +66,7 @@ pub async fn auth_and_subscribe(
         &ClientFrame::Subscribe {
             id: sub_id.to_string(),
             stream: stream.to_string(),
-            key: None,
+            key: key.map(str::to_string),
         },
     )
     .await?;
