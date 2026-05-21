@@ -37,6 +37,14 @@ pub struct Cli {
     #[arg(long, global = true, default_value_t = 10)]
     pub duration: u64,
 
+    /// Peer instances to spin up alongside the ingress (in-process
+    /// only): `0` = single instance, `1` = a single-peer pair, `≥2` = a
+    /// multi-peer fleet. With a fleet, producers push to one instance
+    /// and subscribers connect to another, so the measured path crosses
+    /// a peer-relay hop.
+    #[arg(long, global = true, default_value_t = 0)]
+    pub peers: usize,
+
     /// Emit the result as a single JSON object instead of a human report.
     #[arg(long, global = true)]
     pub json: bool,

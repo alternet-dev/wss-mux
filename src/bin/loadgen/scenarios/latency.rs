@@ -1,5 +1,6 @@
 //! Latency: a paced producer stamps each event; subscribers measure the
-//! push→deliver time.
+//! push→deliver time. With a fleet the measured path includes the
+//! cross-instance relay hop.
 
 use std::time::{Duration, Instant};
 
@@ -9,7 +10,8 @@ use wss_mux::envelope::ServerFrame;
 
 use crate::cli::Cli;
 use crate::client::{self, Recv};
-use crate::report::{LatencyReport, Percentiles, Report, RunMeta};
+use crate::metrics;
+use crate::report::{LatencyReport, Percentiles, RelayStats, Report, RunMeta};
 use crate::scenarios::{post_event, wait_for_subscriptions};
 use crate::server::Target;
 use crate::token;
@@ -21,8 +23,10 @@ pub async fn run(
     interval_ms: u64,
 ) -> Result<Report> {
     let http = reqwest::Client::new();
-    let base = target.base_url();
-    let ws_base = target.ws_url();
+    let producer_base = target.producer_base().to_string();
+    let subscriber_base = target.subscriber_base().to_string();
+    let subscriber_ws = target.subscriber_ws().to_string();
+    let instance_bases = target.instance_bases();
     let token = token::mint_token(&cli.signing_key, &["role:loadgen"])?;
     let subscribers = subscribers.max(1);
 
@@ -35,12 +39,13 @@ pub async fn run(
     // server to register them before the producer starts pushing.
     let mut subs = Vec::with_capacity(subscribers);
     for i in 0..subscribers {
-        let mut ws = client::connect(&ws_base).await?;
+        let mut ws = client::connect(&subscriber_ws).await?;
         client::auth_and_subscribe(&mut ws, &token, &format!("s{i}"), &cli.stream).await?;
         subs.push(ws);
     }
-    wait_for_subscriptions(&http, &base, subscribers).await?;
+    wait_for_subscriptions(&http, &subscriber_base, subscribers).await?;
 
+    let before = metrics::scrape_fleet(&http, &instance_bases).await?;
     let deadline = Instant::now() + Duration::from_secs(cli.duration);
 
     // Each subscriber measures its own deliveries.
@@ -66,7 +71,7 @@ pub async fn run(
     // Paced producer: one stamped event per tick.
     let producer = {
         let http = http.clone();
-        let base = base.clone();
+        let base = producer_base.clone();
         let push_token = cli.push_token.clone();
         let stream = cli.stream.clone();
         tokio::spawn(async move {
@@ -91,16 +96,35 @@ pub async fn run(
         latency_ms.extend(task.await.expect("subscriber task panicked"));
     }
 
+    // Let in-flight cross-instance relays land before the final scrape.
+    if target.peers() > 0 {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    let delta = metrics::scrape_fleet(&http, &instance_bases)
+        .await?
+        .delta(&before);
+    let relay = if target.peers() > 0 {
+        Some(RelayStats::new(
+            delta.relay_events_relayed as u64,
+            delta.relay_sent as u64,
+            delta.relay_events_unwanted as u64,
+        ))
+    } else {
+        None
+    };
+
     Ok(Report::Latency(LatencyReport {
         meta: RunMeta {
             scenario: "latency".to_string(),
             mode: target.mode().to_string(),
+            peers: target.peers(),
             duration_secs: cli.duration,
         },
         subscribers,
         interval_ms,
         samples: latency_ms.len(),
         delivery_latency_ms: Percentiles::from_millis(latency_ms),
+        relay,
     }))
 }
 

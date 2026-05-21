@@ -15,8 +15,8 @@ use crate::token;
 
 pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
     let http = reqwest::Client::new();
-    let base = target.base_url();
-    let ws_base = target.ws_url();
+    let base = target.subscriber_base().to_string();
+    let ws_base = target.subscriber_ws().to_string();
     let token = token::mint_token(&cli.signing_key, &["role:loadgen"])?;
 
     let deadline = Instant::now() + Duration::from_secs(cli.duration);
@@ -50,14 +50,15 @@ pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
         }));
     }
 
-    // Let the fleet reach the server, then sample the sustained counts
-    // around the middle of the hold window.
+    // Let the connections reach the server, then sample the sustained
+    // counts around the middle of the hold window.
     let _ = wait_for_subscriptions(&http, &base, count).await;
     tokio::time::sleep(hold_midpoint(deadline)).await;
     let snap = metrics::scrape(&http, &base).await?;
-    let rss_kib = match target {
-        Target::InProcess { .. } => rss_kib(),
-        Target::External { .. } => None,
+    let rss_kib = if target.mode() == "in-process" {
+        rss_kib()
+    } else {
+        None
     };
 
     // Drain the rest of the window, then collect how many came up.
@@ -72,6 +73,7 @@ pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
         meta: RunMeta {
             scenario: "connections".to_string(),
             mode: target.mode().to_string(),
+            peers: target.peers(),
             duration_secs: cli.duration,
         },
         requested: count,

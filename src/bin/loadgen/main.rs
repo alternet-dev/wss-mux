@@ -30,7 +30,13 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let target = server::start(cli.target.clone(), &cli.signing_key, &cli.push_token).await?;
+    let target = server::start(
+        cli.target.clone(),
+        cli.peers,
+        &cli.signing_key,
+        &cli.push_token,
+    )
+    .await?;
 
     let report = match &cli.scenario {
         Scenario::Throughput {
