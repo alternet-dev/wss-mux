@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779348738104,
+  "lastUpdate": 1779383016311,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -179,6 +179,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 130,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "000e2741684b85c683d5627802045ccc59591bc5",
+          "message": "feat: add in-repo load and stress harness binary (#45)\n\nAdds `wss-mux-loadgen`, a black-box harness measuring throughput,\nlatency, and connection-count behavior against either an in-process\nwss-mux (spawned on an ephemeral port — self-contained) or an external\ninstance via `--target`. Three scenarios — `throughput`, `latency`,\n`connections` — each printing a human report or, with `--json`, a\nsingle parseable object that stamps its mode.\n\nNo new dependencies: the harness reuses crates already in\n`[dependencies]`, and pushes go out via `.body()` (not reqwest's\n`.json()`) so the production feature set is unchanged. It is a separate\n`[[bin]]` — the shipped `wss-mux` binary is untouched — and its only\ntests are pure-function unit tests, keeping load-test flakiness out of\nthe gate.",
+          "timestamp": "2026-05-21T10:56:44-06:00",
+          "tree_id": "2309a436afec86bf89815ce6b89b2f02aa888c0e",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/000e2741684b85c683d5627802045ccc59591bc5"
+        },
+        "date": 1779383015931,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 301,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1912,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 4018,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 34141,
+            "range": "± 87",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 332,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2360,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28626,
+            "range": "± 2182",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 364105,
+            "range": "± 23223",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4594391,
+            "range": "± 321657",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 169,
+            "range": "± 469",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 154,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33663,
+            "range": "± 107",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 180,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 77,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 79,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 338,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 102,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2263,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38392,
+            "range": "± 814",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 378611,
+            "range": "± 2248",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6374,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 137,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
