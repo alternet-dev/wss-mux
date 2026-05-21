@@ -196,6 +196,12 @@ covered end-to-end in [docs/operations.md](docs/operations.md).
 
 LLM agents: start with [AGENTS.md](AGENTS.md).
 
+## Performance
+
+Hot-path microbenchmarks (`cargo bench`) run on every push; results are
+published and tracked over time at the
+[benchmark dashboard](https://alternet-dev.github.io/wss-mux/dev/bench/).
+
 ## Status
 
 v0.x — pre-stable. Contracts may break between minor versions until
