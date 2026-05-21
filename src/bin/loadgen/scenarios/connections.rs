@@ -1,5 +1,7 @@
 //! Connections: open and hold N connections, report the sustained
-//! active counts the server itself reports.
+//! active counts the server itself reports. Topology-agnostic — this
+//! scenario generates no event traffic, so it connects every client to
+//! a single instance.
 
 use std::time::{Duration, Instant};
 
@@ -15,8 +17,9 @@ use crate::token;
 
 pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
     let http = reqwest::Client::new();
-    let base = target.subscriber_base().to_string();
-    let ws_base = target.subscriber_ws().to_string();
+    let idx = target.subscriber_index();
+    let base = target.instance_base(idx).to_string();
+    let ws_base = target.instance_ws(idx).to_string();
     let token = token::mint_token(&cli.signing_key, &["role:loadgen"])?;
 
     let deadline = Instant::now() + Duration::from_secs(cli.duration);
@@ -34,7 +37,7 @@ pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
                 Ok(ws) => ws,
                 Err(_) => return false,
             };
-            if client::auth_and_subscribe(&mut ws, &token, "s0", &stream)
+            if client::auth_and_subscribe(&mut ws, &token, "s0", &stream, None)
                 .await
                 .is_err()
             {
@@ -52,7 +55,7 @@ pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
 
     // Let the connections reach the server, then sample the sustained
     // counts around the middle of the hold window.
-    let _ = wait_for_subscriptions(&http, &base, count).await;
+    let _ = wait_for_subscriptions(&http, &[base.as_str()], count).await;
     tokio::time::sleep(hold_midpoint(deadline)).await;
     let snap = metrics::scrape(&http, &base).await?;
     let rss_kib = if target.mode() == "in-process" {
@@ -73,6 +76,7 @@ pub async fn run(cli: &Cli, target: &Target, count: usize) -> Result<Report> {
         meta: RunMeta {
             scenario: "connections".to_string(),
             mode: target.mode().to_string(),
+            topology: cli.topology.as_str().to_string(),
             peers: target.peers(),
             duration_secs: cli.duration,
         },

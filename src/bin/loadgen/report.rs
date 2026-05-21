@@ -12,6 +12,8 @@ pub struct RunMeta {
     pub scenario: String,
     /// `in-process` or `external`.
     pub mode: String,
+    /// The named traffic topology — `broadcast` / `concentrated` / `keyed`.
+    pub topology: String,
     /// Peer instances beyond the ingress (`0` ⇒ single instance).
     pub peers: usize,
     pub duration_secs: u64,
@@ -120,7 +122,7 @@ pub struct ThroughputReport {
     pub pushes_failed: u64,
     pub push_rate_per_sec: f64,
     /// `wss_mux_events_dispatched_total` delta — per-subscription
-    /// deliveries, so ≈ `pushes_ok × subscribers` when nothing drops.
+    /// deliveries fleet-wide.
     pub events_delivered: u64,
     pub delivery_rate_per_sec: f64,
     /// `wss_mux_events_dropped_total{reason="overflow"}` delta — a
@@ -180,8 +182,9 @@ impl fmt::Display for ThroughputReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "throughput  (mode: {}, peers: {}, {}s, {} subscribers, {} producers)",
+            "throughput  (mode: {}, topology: {}, peers: {}, {}s, {} subscribers, {} producers)",
             self.meta.mode,
+            self.meta.topology,
             self.meta.peers,
             self.meta.duration_secs,
             self.subscribers,
@@ -210,8 +213,9 @@ impl fmt::Display for LatencyReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "latency  (mode: {}, peers: {}, {}s, {} subscribers, {}ms interval)",
+            "latency  (mode: {}, topology: {}, peers: {}, {}s, {} subscribers, {}ms interval)",
             self.meta.mode,
+            self.meta.topology,
             self.meta.peers,
             self.meta.duration_secs,
             self.subscribers,

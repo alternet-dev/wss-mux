@@ -2,6 +2,8 @@
 
 use clap::{Parser, Subcommand};
 
+use crate::topology::Topology;
+
 /// Load and stress harness for wss-mux.
 ///
 /// With no `--target`, a wss-mux instance is spawned in-process on an
@@ -44,6 +46,13 @@ pub struct Cli {
     /// a peer-relay hop.
     #[arg(long, global = true, default_value_t = 0)]
     pub peers: usize,
+
+    /// Traffic topology for fleet runs: `broadcast` — subscribers
+    /// balanced across the fleet; `concentrated` — all subscribers on
+    /// one instance; `keyed` — many small-audience keys, subscribers
+    /// scattered. Drives how much cross-instance relay is wasted.
+    #[arg(long, global = true, value_enum, default_value = "broadcast")]
+    pub topology: Topology,
 
     /// Emit the result as a single JSON object instead of a human report.
     #[arg(long, global = true)]

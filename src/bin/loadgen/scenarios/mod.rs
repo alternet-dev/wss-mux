@@ -10,18 +10,21 @@ use anyhow::{bail, Result};
 
 use crate::metrics;
 
-/// Poll `<base_url>/metrics` until `wss_mux_subscriptions_active` reaches
-/// `expected`, or fail after ~10s. This is the black-box readiness gate
-/// before a producer starts pushing — there is no per-frame ack.
+/// Poll the fleet's `/metrics` until `wss_mux_subscriptions_active`,
+/// summed across `bases`, reaches `expected`, or fail after ~10s. The
+/// black-box readiness gate before a producer starts pushing — there is
+/// no per-frame ack.
 pub async fn wait_for_subscriptions(
     http: &reqwest::Client,
-    base_url: &str,
+    bases: &[&str],
     expected: usize,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last = 0i64;
     while Instant::now() < deadline {
-        last = metrics::scrape(http, base_url).await?.subscriptions_active as i64;
+        last = metrics::scrape_fleet(http, bases)
+            .await?
+            .subscriptions_active as i64;
         if last >= expected as i64 {
             return Ok(());
         }

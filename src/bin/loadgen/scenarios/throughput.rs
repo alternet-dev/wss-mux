@@ -1,7 +1,7 @@
 //! Throughput: hold N subscribers, push as fast as a pool of producers
-//! can for the measurement window, report the ingest ceiling. With a
-//! fleet, producers push to the ingress instance and subscribers are
-//! held on another, so the measured path crosses a peer-relay hop.
+//! can for the measurement window, report the ingest ceiling. The
+//! `--topology` setting decides how subscribers and keys sit across the
+//! fleet — and thus how much cross-instance relay is wasted.
 
 use std::time::{Duration, Instant};
 
@@ -34,21 +34,28 @@ pub async fn run(
 ) -> Result<Report> {
     let http = reqwest::Client::new();
     let producer_base = target.producer_base().to_string();
-    let subscriber_base = target.subscriber_base().to_string();
-    let subscriber_ws = target.subscriber_ws().to_string();
     let instance_bases = target.instance_bases();
     let token = token::mint_token(&cli.signing_key, &["role:loadgen"])?;
     let producers = producers.max(1);
 
     let deadline = Instant::now() + Duration::from_secs(cli.duration);
 
-    // Hold `subscribers` draining connections on the subscriber instance
-    // so per-sub channels never fill — a full channel would be overflow,
-    // not throughput.
+    // Place each subscriber per the topology, holding a draining
+    // connection so per-sub channels never fill (overflow ≠ throughput).
+    let plan =
+        cli.topology
+            .subscriber_plan(subscribers, target.fleet_size(), target.subscriber_index());
     let mut drains = Vec::with_capacity(subscribers);
-    for i in 0..subscribers {
-        let mut ws = client::connect(&subscriber_ws).await?;
-        client::auth_and_subscribe(&mut ws, &token, &format!("s{i}"), &cli.stream).await?;
+    for (i, placement) in plan.iter().enumerate() {
+        let mut ws = client::connect(target.instance_ws(placement.instance)).await?;
+        client::auth_and_subscribe(
+            &mut ws,
+            &token,
+            &format!("s{i}"),
+            &cli.stream,
+            placement.key.as_deref(),
+        )
+        .await?;
         drains.push(tokio::spawn(async move {
             while Instant::now() < deadline {
                 match client::next(&mut ws, Duration::from_secs(1)).await {
@@ -59,14 +66,22 @@ pub async fn run(
         }));
     }
 
-    wait_for_subscriptions(&http, &subscriber_base, subscribers).await?;
+    wait_for_subscriptions(&http, &instance_bases, subscribers).await?;
 
-    // A constant pre-serialized body — the harness must not bottleneck
-    // on JSON encoding while it is measuring the server.
-    let body = serde_json::to_vec(&json!({
-        "stream": cli.stream,
-        "payload": {"loadgen": true},
-    }))?;
+    // One constant pre-serialized body per producer key — the harness
+    // must not bottleneck on JSON encoding while measuring the server.
+    let bodies: Vec<Vec<u8>> = cli
+        .topology
+        .producer_keys(subscribers)
+        .iter()
+        .map(|key| {
+            let body = match key {
+                Some(k) => json!({"stream": cli.stream, "key": k, "payload": {"loadgen": true}}),
+                None => json!({"stream": cli.stream, "payload": {"loadgen": true}}),
+            };
+            serde_json::to_vec(&body).expect("serialize loadgen body")
+        })
+        .collect();
 
     let before = metrics::scrape_fleet(&http, &instance_bases).await?;
 
@@ -75,16 +90,19 @@ pub async fn run(
         let http = http.clone();
         let base = producer_base.clone();
         let push_token = cli.push_token.clone();
-        let body = body.clone();
+        let bodies = bodies.clone();
         producer_tasks.push(tokio::spawn(async move {
             let mut result = ProducerResult {
                 ok: 0,
                 failed: 0,
                 latency_ms: Vec::new(),
             };
+            let mut cursor = 0usize;
             while Instant::now() < deadline {
+                let body = &bodies[cursor % bodies.len()];
+                cursor += 1;
                 let started = Instant::now();
-                match post_event(&http, &base, &push_token, &body).await {
+                match post_event(&http, &base, &push_token, body).await {
                     Ok(status) if status.is_success() => result.ok += 1,
                     _ => result.failed += 1,
                 }
@@ -132,6 +150,7 @@ pub async fn run(
         meta: RunMeta {
             scenario: "throughput".to_string(),
             mode: target.mode().to_string(),
+            topology: cli.topology.as_str().to_string(),
             peers: target.peers(),
             duration_secs: cli.duration,
         },

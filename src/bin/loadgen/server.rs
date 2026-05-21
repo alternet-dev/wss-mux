@@ -78,25 +78,31 @@ impl Target {
         self.instances.len() - 1
     }
 
+    /// Number of instances in the fleet (always ≥ 1).
+    pub fn fleet_size(&self) -> usize {
+        self.instances.len()
+    }
+
+    /// Index of the instance the `concentrated` topology pins every
+    /// subscriber to, and the one a single-instance run uses: instance
+    /// 1 in a fleet, instance 0 otherwise.
+    pub fn subscriber_index(&self) -> usize {
+        self.instances.len().min(2) - 1
+    }
+
     /// REST base of the ingress instance — where producers push.
     pub fn producer_base(&self) -> &str {
         self.instances[0].base_url.as_str()
     }
 
-    /// The instance subscribers connect to: instance 1 in a fleet (so
-    /// the path crosses a relay hop), else the sole instance.
-    fn subscriber(&self) -> &Instance {
-        &self.instances[self.instances.len().min(2) - 1]
+    /// REST base of instance `idx`.
+    pub fn instance_base(&self, idx: usize) -> &str {
+        self.instances[idx].base_url.as_str()
     }
 
-    /// WebSocket base of the subscriber instance.
-    pub fn subscriber_ws(&self) -> &str {
-        self.subscriber().ws_url.as_str()
-    }
-
-    /// REST base of the subscriber instance — for the readiness scrape.
-    pub fn subscriber_base(&self) -> &str {
-        self.subscriber().base_url.as_str()
+    /// WebSocket base of instance `idx`.
+    pub fn instance_ws(&self, idx: usize) -> &str {
+        self.instances[idx].ws_url.as_str()
     }
 
     /// REST bases of every instance — for fleet-wide metric scraping.

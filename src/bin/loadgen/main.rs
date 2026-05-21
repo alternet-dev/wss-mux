@@ -11,6 +11,7 @@ mod report;
 mod scenarios;
 mod server;
 mod token;
+mod topology;
 
 use anyhow::Result;
 use clap::Parser;
