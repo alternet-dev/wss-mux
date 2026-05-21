@@ -54,7 +54,9 @@ async fn main() -> Result<()> {
         Scenario::SlowConsumer => scenarios::slow_consumer::run(&cli).await?,
         Scenario::DeadPeer => scenarios::dead_peer::run(&cli).await?,
         Scenario::CoalesceSaturate => scenarios::coalesce_saturate::run(&cli).await?,
-        Scenario::ReconnectStorm { count } => scenarios::reconnect_storm::run(&cli, *count).await?,
+        Scenario::ReconnectStorm { count, jitter_ms } => {
+            scenarios::reconnect_storm::run(&cli, *count, *jitter_ms).await?
+        }
         Scenario::PayloadCap => scenarios::payload_cap::run(&cli).await?,
         Scenario::RateLimit => scenarios::rate_limit::run(&cli).await?,
     };

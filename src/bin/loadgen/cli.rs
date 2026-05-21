@@ -105,6 +105,11 @@ pub enum Scenario {
         /// Connections opened (and dropped) per wave.
         #[arg(long, default_value_t = 100)]
         count: usize,
+        /// Spread each wave's connects over this window, in
+        /// milliseconds; `0` fires the whole wave at once (a pure
+        /// thundering herd).
+        #[arg(long, default_value_t = 250)]
+        jitter_ms: u64,
     },
     /// Payload cap: POST an oversized payload to a capped stream;
     /// confirm a 413 and that the rejection is metered.

@@ -2,6 +2,10 @@
 //! repeated waves, re-establishing the whole set each time. Confirms
 //! the server cleans up every dropped connection (no leak —
 //! `connections_active` settles low) and keeps admitting fresh waves.
+//!
+//! `jitter_ms` spreads each wave's connects over a window, so the storm
+//! is a realistic staggered reconnect rather than a single-instant
+//! thundering herd; `--jitter-ms 0` recovers the herd.
 
 use std::time::{Duration, Instant};
 
@@ -20,7 +24,7 @@ const STREAM: &str = "loadgen";
 /// each closed connection lingers in `TIME_WAIT`.
 const MAX_CONNECTIONS: u64 = 5000;
 
-pub async fn run(cli: &Cli, count: usize) -> Result<Report> {
+pub async fn run(cli: &Cli, count: usize, jitter_ms: u64) -> Result<Report> {
     let http = reqwest::Client::new();
     let target = server::start_profiled(
         server::ServerProfile::default(),
@@ -39,13 +43,16 @@ pub async fn run(cli: &Cli, count: usize) -> Result<Report> {
     let mut resubscribe_ms = Vec::new();
 
     while Instant::now() < deadline && attempts < MAX_CONNECTIONS {
-        // A wave: open `count` connections concurrently, holding each
-        // one alive once it is up and subscribed.
+        // A wave: open `count` connections, each staggered by up to
+        // `jitter_ms` so the wave is not a single-instant herd.
         let mut tasks = Vec::with_capacity(count);
-        for _ in 0..count {
+        for i in 0..count {
             let ws_base = ws_base.clone();
             let token = token.clone();
             tasks.push(tokio::spawn(async move {
+                if jitter_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(stagger(i) % jitter_ms)).await;
+                }
                 let started = Instant::now();
                 let mut ws = client::connect(&ws_base).await.ok()?;
                 client::auth_and_subscribe(&mut ws, &token, "s0", STREAM, None)
@@ -105,7 +112,16 @@ pub async fn run(cli: &Cli, count: usize) -> Result<Report> {
     ];
     Ok(Report::Oddity(OddityReport::new(
         oddity_meta(cli, "reconnect-storm"),
-        format!("{count} connections opened, held, dropped, and re-established in waves"),
+        format!("{count} connections re-established in waves, each staggered over {jitter_ms}ms"),
         findings,
     )))
+}
+
+/// SplitMix64 finalizer — a deterministic hash that scatters a wave's
+/// connections across the jitter window without a `rand` dependency.
+fn stagger(i: usize) -> u64 {
+    let mut z = (i as u64).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
