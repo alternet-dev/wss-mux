@@ -1,7 +1,7 @@
 //! `wss-mux-loadgen` — a load and stress harness for wss-mux.
 //!
-//! Drives throughput, latency, and connection-count measurements
-//! against either an in-process or an external wss-mux instance, and
+//! Drives throughput, latency, connection-count, and traffic-oddity
+//! measurements against an in-process or external wss-mux instance, and
 //! prints a human or `--json` report.
 
 mod cli;
@@ -17,6 +17,7 @@ use anyhow::Result;
 use clap::Parser;
 
 use crate::cli::{Cli, Scenario};
+use crate::server::Target;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,26 +32,31 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let target = server::start(
-        cli.target.clone(),
-        cli.peers,
-        &cli.signing_key,
-        &cli.push_token,
-    )
-    .await?;
-
     let report = match &cli.scenario {
         Scenario::Throughput {
             subscribers,
             producers,
-        } => scenarios::throughput::run(&cli, &target, *subscribers, *producers).await?,
+        } => {
+            let target = fleet(&cli).await?;
+            scenarios::throughput::run(&cli, &target, *subscribers, *producers).await?
+        }
         Scenario::Latency {
             subscribers,
             interval_ms,
-        } => scenarios::latency::run(&cli, &target, *subscribers, *interval_ms).await?,
+        } => {
+            let target = fleet(&cli).await?;
+            scenarios::latency::run(&cli, &target, *subscribers, *interval_ms).await?
+        }
         Scenario::Connections { count } => {
+            let target = fleet(&cli).await?;
             scenarios::connections::run(&cli, &target, *count).await?
         }
+        Scenario::SlowConsumer => scenarios::slow_consumer::run(&cli).await?,
+        Scenario::DeadPeer => scenarios::dead_peer::run(&cli).await?,
+        Scenario::CoalesceSaturate => scenarios::coalesce_saturate::run(&cli).await?,
+        Scenario::ReconnectStorm { count } => scenarios::reconnect_storm::run(&cli, *count).await?,
+        Scenario::PayloadCap => scenarios::payload_cap::run(&cli).await?,
+        Scenario::RateLimit => scenarios::rate_limit::run(&cli).await?,
     };
 
     if cli.json {
@@ -59,4 +65,17 @@ async fn main() -> Result<()> {
         println!("{report}");
     }
     Ok(())
+}
+
+/// Bring up the in-process (or external) fleet the throughput, latency,
+/// and connections scenarios drive. The traffic-oddity scenarios
+/// instead provision their own profiled instance.
+async fn fleet(cli: &Cli) -> Result<Target> {
+    server::start(
+        cli.target.clone(),
+        cli.peers,
+        &cli.signing_key,
+        &cli.push_token,
+    )
+    .await
 }

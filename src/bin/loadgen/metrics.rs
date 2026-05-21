@@ -10,22 +10,29 @@ pub struct MetricsSnapshot {
     pub connections_active: f64,
     pub subscriptions_active: f64,
     /// `wss_mux_events_dispatched_total`, summed across `{stream=…}`.
-    /// One per-subscription delivery, so a push fanned to N subscribers
-    /// adds N.
     pub events_dispatched: f64,
     /// `wss_mux_events_dropped_total{reason="overflow"}` — a full
-    /// per-subscription channel. The benign `no_subscribers` reason is
-    /// excluded: it dominates on a non-subscriber fleet instance and is
-    /// captured instead by `relay_events_unwanted`.
+    /// per-subscription channel.
     pub overflow_drops: f64,
-    /// `wss_mux_relay_events_relayed_total` — events handed to the
-    /// peer-relay path (counted on the relaying instance).
+    /// `wss_mux_relay_events_relayed_total` — events handed to relay.
     pub relay_events_relayed: f64,
     /// `wss_mux_relay_sent_total` — successful per-peer relay POSTs.
     pub relay_sent: f64,
-    /// `wss_mux_relay_events_unwanted_total` — relayed events that
-    /// matched no local subscription (the cross-instance-waste signal).
+    /// `wss_mux_relay_events_unwanted_total` — relayed events matching
+    /// no local subscription.
     pub relay_events_unwanted: f64,
+    /// `wss_mux_relay_failed_total{reason="connect"}` — relay POSTs that
+    /// could not establish a connection (the dead-peer signal).
+    pub relay_failed_connect: f64,
+    /// `wss_mux_relay_queue_dropped_total` — batches dropped because the
+    /// coalescing queue was full.
+    pub relay_queue_dropped: f64,
+    /// `wss_mux_relay_flushes_total` — relay coalescing flush cycles.
+    pub relay_flushes: f64,
+    /// `wss_mux_events_rejected_total{reason="payload_too_large"}`.
+    pub events_rejected_payload: f64,
+    /// `wss_mux_frames_rate_limited_total` — inbound frames throttled.
+    pub frames_rate_limited: f64,
 }
 
 impl MetricsSnapshot {
@@ -39,6 +46,11 @@ impl MetricsSnapshot {
         self.relay_events_relayed += other.relay_events_relayed;
         self.relay_sent += other.relay_sent;
         self.relay_events_unwanted += other.relay_events_unwanted;
+        self.relay_failed_connect += other.relay_failed_connect;
+        self.relay_queue_dropped += other.relay_queue_dropped;
+        self.relay_flushes += other.relay_flushes;
+        self.events_rejected_payload += other.events_rejected_payload;
+        self.frames_rate_limited += other.frames_rate_limited;
     }
 
     /// Counter movement from `before` to `self`.
@@ -100,6 +112,19 @@ fn parse(body: &str) -> MetricsSnapshot {
         relay_events_relayed: sum_series(body, "wss_mux_relay_events_relayed_total", None),
         relay_sent: sum_series(body, "wss_mux_relay_sent_total", None),
         relay_events_unwanted: sum_series(body, "wss_mux_relay_events_unwanted_total", None),
+        relay_failed_connect: sum_series(
+            body,
+            "wss_mux_relay_failed_total",
+            Some("reason=\"connect\""),
+        ),
+        relay_queue_dropped: sum_series(body, "wss_mux_relay_queue_dropped_total", None),
+        relay_flushes: sum_series(body, "wss_mux_relay_flushes_total", None),
+        events_rejected_payload: sum_series(
+            body,
+            "wss_mux_events_rejected_total",
+            Some("reason=\"payload_too_large\""),
+        ),
+        frames_rate_limited: sum_series(body, "wss_mux_frames_rate_limited_total", None),
     }
 }
 
@@ -142,7 +167,6 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = "\
-# HELP wss_mux_connections_active Currently open WebSocket connections
 # TYPE wss_mux_connections_active gauge
 wss_mux_connections_active 12
 # TYPE wss_mux_subscriptions_active gauge
@@ -159,11 +183,22 @@ wss_mux_relay_events_relayed_total 50
 wss_mux_relay_sent_total 150
 # TYPE wss_mux_relay_events_unwanted counter
 wss_mux_relay_events_unwanted_total 100
+# TYPE wss_mux_relay_failed counter
+wss_mux_relay_failed_total{reason=\"connect\"} 9
+wss_mux_relay_failed_total{reason=\"timeout\"} 2
+# TYPE wss_mux_relay_queue_dropped counter
+wss_mux_relay_queue_dropped_total 17
+# TYPE wss_mux_relay_flushes counter
+wss_mux_relay_flushes_total 4
+# TYPE wss_mux_events_rejected counter
+wss_mux_events_rejected_total{reason=\"payload_too_large\"} 6
+# TYPE wss_mux_frames_rate_limited counter
+wss_mux_frames_rate_limited_total 23
 # EOF
 ";
 
     #[test]
-    fn parses_gauges_relay_counters_and_overflow_only_drops() {
+    fn parses_every_metric_the_scenarios_read() {
         let snap = parse(SAMPLE);
         assert_eq!(snap.connections_active, 12.0);
         assert_eq!(snap.subscriptions_active, 12.0);
@@ -173,6 +208,12 @@ wss_mux_relay_events_unwanted_total 100
         assert_eq!(snap.relay_events_relayed, 50.0);
         assert_eq!(snap.relay_sent, 150.0);
         assert_eq!(snap.relay_events_unwanted, 100.0);
+        // Only the connect reason — the timeout 2 is excluded.
+        assert_eq!(snap.relay_failed_connect, 9.0);
+        assert_eq!(snap.relay_queue_dropped, 17.0);
+        assert_eq!(snap.relay_flushes, 4.0);
+        assert_eq!(snap.events_rejected_payload, 6.0);
+        assert_eq!(snap.frames_rate_limited, 23.0);
     }
 
     #[test]
@@ -214,6 +255,7 @@ wss_mux_relay_events_unwanted_total 100
         total.accumulate(&parse(SAMPLE));
         assert_eq!(total.events_dispatched, 1000.0);
         assert_eq!(total.relay_events_unwanted, 200.0);
+        assert_eq!(total.frames_rate_limited, 46.0);
     }
 
     #[test]

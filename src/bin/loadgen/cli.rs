@@ -89,4 +89,27 @@ pub enum Scenario {
         #[arg(long, default_value_t = 500)]
         count: usize,
     },
+    /// Slow consumer: a subscriber stops reading on a small-queue
+    /// stream; confirm it overflows alone while a healthy client
+    /// keeps receiving.
+    SlowConsumer,
+    /// Dead peer: relay to a guaranteed-closed peer; confirm the
+    /// failures are metered and the producer is never back-pressured.
+    DeadPeer,
+    /// Coalesce saturation: burst past a small relay-coalescing queue;
+    /// confirm batches drop and meter, with no producer back-pressure.
+    CoalesceSaturate,
+    /// Reconnect storm: open, drop, and immediately re-establish N
+    /// connections in waves; confirm the server recovers each wave.
+    ReconnectStorm {
+        /// Connections opened (and dropped) per wave.
+        #[arg(long, default_value_t = 100)]
+        count: usize,
+    },
+    /// Payload cap: POST an oversized payload to a capped stream;
+    /// confirm a 413 and that the rejection is metered.
+    PayloadCap,
+    /// Rate limit: flood inbound frames past a low rate limit; confirm
+    /// keep-open rate-limited errors and that admission later resumes.
+    RateLimit,
 }

@@ -113,6 +113,56 @@ impl fmt::Display for RelayStats {
     }
 }
 
+/// One expected-vs-observed check within a traffic-oddity scenario.
+#[derive(Debug, Serialize)]
+pub struct Finding {
+    pub label: String,
+    pub expected: String,
+    pub observed: String,
+    pub ok: bool,
+}
+
+impl Finding {
+    pub fn new(
+        label: impl Into<String>,
+        expected: impl Into<String>,
+        observed: impl Into<String>,
+        ok: bool,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            expected: expected.into(),
+            observed: observed.into(),
+            ok,
+        }
+    }
+}
+
+/// A traffic-oddity scenario's result: the pathological condition it
+/// drove, a set of expected-vs-observed findings, and the overall "did
+/// wss-mux degrade the way the docs say it should" verdict.
+#[derive(Debug, Serialize)]
+pub struct OddityReport {
+    pub meta: RunMeta,
+    /// One line describing the pathological condition driven.
+    pub drives: String,
+    pub findings: Vec<Finding>,
+    /// `true` iff every finding holds — never gates the process exit.
+    pub degraded_as_designed: bool,
+}
+
+impl OddityReport {
+    pub fn new(meta: RunMeta, drives: impl Into<String>, findings: Vec<Finding>) -> Self {
+        let degraded_as_designed = findings.iter().all(|finding| finding.ok);
+        Self {
+            meta,
+            drives: drives.into(),
+            findings,
+            degraded_as_designed,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ThroughputReport {
     pub meta: RunMeta,
@@ -166,6 +216,7 @@ pub enum Report {
     Throughput(ThroughputReport),
     Latency(LatencyReport),
     Connections(ConnectionsReport),
+    Oddity(OddityReport),
 }
 
 impl fmt::Display for Report {
@@ -174,6 +225,7 @@ impl fmt::Display for Report {
             Report::Throughput(r) => r.fmt(f),
             Report::Latency(r) => r.fmt(f),
             Report::Connections(r) => r.fmt(f),
+            Report::Oddity(r) => r.fmt(f),
         }
     }
 }
@@ -250,9 +302,49 @@ impl fmt::Display for ConnectionsReport {
     }
 }
 
+impl fmt::Display for OddityReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{}  (mode: {}, {}s)",
+            self.meta.scenario, self.meta.mode, self.meta.duration_secs
+        )?;
+        writeln!(f, "  drives: {}", self.drives)?;
+        for finding in &self.findings {
+            writeln!(
+                f,
+                "  [{}] {:<32} expected {}  observed {}",
+                if finding.ok { "ok" } else { "!!" },
+                finding.label,
+                finding.expected,
+                finding.observed
+            )?;
+        }
+        write!(
+            f,
+            "  verdict: {}",
+            if self.degraded_as_designed {
+                "degraded as designed"
+            } else {
+                "UNEXPECTED — see the findings above"
+            }
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn meta() -> RunMeta {
+        RunMeta {
+            scenario: "t".to_string(),
+            mode: "in-process".to_string(),
+            topology: "broadcast".to_string(),
+            peers: 0,
+            duration_secs: 3,
+        }
+    }
 
     #[test]
     fn percentiles_of_empty_input_are_zero() {
@@ -282,5 +374,28 @@ mod tests {
         assert_eq!(r.waste_ratio, 2.0);
         // No relay traffic ⇒ ratio is zero, not a division by zero.
         assert_eq!(RelayStats::new(0, 0, 0).waste_ratio, 0.0);
+    }
+
+    #[test]
+    fn oddity_verdict_holds_only_when_every_finding_holds() {
+        let all_ok = OddityReport::new(
+            meta(),
+            "drives",
+            vec![
+                Finding::new("a", "x", "x", true),
+                Finding::new("b", "y", "y", true),
+            ],
+        );
+        assert!(all_ok.degraded_as_designed);
+
+        let one_bad = OddityReport::new(
+            meta(),
+            "drives",
+            vec![
+                Finding::new("a", "x", "x", true),
+                Finding::new("b", "y", "z", false),
+            ],
+        );
+        assert!(!one_bad.degraded_as_designed);
     }
 }
