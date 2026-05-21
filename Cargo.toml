@@ -13,14 +13,36 @@ categories = ["network-programming", "web-programming::websocket"]
 [lib]
 name = "wss_mux"
 path = "src/lib.rs"
+# Only the `[[bench]]` targets carry benchmarks; keep `cargo bench`
+# from also running the lib/bin/test under the libtest harness (it
+# rejects criterion's CLI flags).
+bench = false
 
 [[bin]]
 name = "wss-mux"
 path = "src/main.rs"
+bench = false
 
 [[test]]
 name = "integration"
 path = "tests/integration/main.rs"
+bench = false
+
+[[bench]]
+name = "dispatch"
+harness = false
+
+[[bench]]
+name = "registry"
+harness = false
+
+[[bench]]
+name = "envelope"
+harness = false
+
+[[bench]]
+name = "cbor"
+harness = false
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
@@ -54,3 +76,10 @@ axum = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = "0.21"
 ciborium = "0.2"
+criterion = "0.5"
+
+[profile.bench]
+# Bench against an optimized, low-variance build so microbench numbers
+# reflect release behavior.
+lto = "thin"
+codegen-units = 1
