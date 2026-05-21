@@ -37,8 +37,8 @@ required.
   relay (byte-identical to single-instance).
 - Authentication is two-stage: connection-level (auth frame) and
   subscription-level (audience check).
-- Overflow → close, not block. Backpressure never reaches the
-  producer.
+- Overflow drops the offending subscription (keep-open); it never
+  blocks, and backpressure never reaches the producer.
 - The default build's only non-Rust code is `ring` (C + assembly),
   pulled transitively for crypto: `jsonwebtoken` (token validation,
   since v0.1; Ed25519 and OIDC JWKS verification, v0.4) and `rustls`
@@ -74,11 +74,14 @@ required.
 cargo build --release
 cargo test
 cargo clippy --all-targets
+cargo bench               # criterion hot-path microbenchmarks
 docker build -t wss-mux .
 ```
 
 Integration tests in `tests/integration/` run pure-Rust — no Docker,
-no external services.
+no external services. `benches/` holds the criterion microbenchmarks;
+`src/bin/loadgen/` is the `wss-mux-loadgen` load and stress harness
+(throughput, latency, connections, peer fleets, traffic oddities).
 
 ## Where to put new things
 

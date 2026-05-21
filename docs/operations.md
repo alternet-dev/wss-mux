@@ -219,8 +219,9 @@ window; `WSS_MUX_RELAY_COALESCE_MAX_EVENTS` caps events per POST (and
 bounds loss if a relay POST fails); `WSS_MUX_RELAY_QUEUE_DEPTH` bounds
 the in-process queue (full ⇒ batches dropped, metered
 `wss_mux_relay_queue_dropped_total`, never producer backpressure). The
-flush task is supervised — a panic is metered
-`wss_mux_relay_flush_restarts_total` and the task restarts. Watch
+flush loop is panic-free by construction; if it ever stopped,
+`wss_mux_relay_queue_dropped_total` climbs and `wss_mux_relay_sent_total`
+flatlines — the operator-visible signal. Watch
 `wss_mux_relay_events_unwanted_total` ÷
 `wss_mux_relay_events_relayed_total`: a high ratio means most relayed
 events have no local subscriber (stream-sparse fleet) and selective
@@ -292,3 +293,139 @@ skew); `timeout` means peers are overloaded or
 | `413` from `POST /v1/events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
 | Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/v1/relay`; it is internal-only |
 | Reconnect storm on every deploy | Expected with ephemeral connections on rolling restart | Ensure clients reconnect with jittered backoff and auto-resubscribe |
+
+## Traffic oddities — a consumer runbook
+
+Real traffic is messy: clients stall, payloads bloat, peers vanish,
+whole fleets reconnect at once. `wss-mux` degrades *gracefully* under
+each — it sheds the offending load, meters it, and keeps everything
+else running. This runbook maps each anomaly to **what you observe**,
+**what `wss-mux` is doing**, and **the fix** — which is almost always
+embedder- or operator-side, not a `wss-mux` change.
+
+Every oddity here is reproducible with the in-repo load harness; see
+[Reproducing these](#reproducing-these) at the end.
+
+### A slow consumer
+
+- **Observe.** One subscription stops receiving. That client gets an
+  `error` frame with `code: "overflow"` and the subscription `id`;
+  `wss_mux_events_dropped_total{reason="overflow"}` climbs. The
+  connection and the client's *other* subscriptions keep running.
+- **What `wss-mux` is doing.** That subscription's send queue filled —
+  the client read slower than the stream's event rate. The depth is
+  the stream's manifest `queue_depth`, else `WSS_MUX_QUEUE_DEPTH`
+  (default `1024`). On overflow `wss-mux` drops **only that
+  subscription**, keep-open: overflow is per-subscription, never
+  per-connection.
+- **Fix.** The client should drain its WebSocket faster. If the stream
+  is legitimately bursty, raise its `queue_depth` in the manifest or
+  the global `WSS_MUX_QUEUE_DEPTH`; `queue_depth: 0` is unbounded — no
+  overflow ever, at the cost of an unbounded memory footprint if the
+  client stalls. After an overflow the client may `subscribe` again to
+  resume.
+
+### A payload over the cap
+
+- **Observe.** A producer `POST /v1/events` returns `413 Payload Too
+  Large`; `wss_mux_events_rejected_total{reason="payload_too_large"}`
+  climbs.
+- **What `wss-mux` is doing.** The event's payload exceeded the
+  stream's `max_payload_bytes` (measured as the JSON-serialized payload
+  length, so the cap is codec-stable). It is rejected at ingest, before
+  any dispatch or relay. In a batch, one oversized event rejects the
+  whole batch — all-or-nothing.
+- **Fix.** Keep payloads under the cap, or raise `max_payload_bytes` on
+  that stream in the manifest (absent ⇒ no cap). The cap exists to
+  bound fanout amplification, so shrinking the payload is usually the
+  right call.
+
+### An inbound frame flood
+
+- **Observe.** A client gets `error` frames with `code:
+  "rate_limited"`; `wss_mux_frames_rate_limited_total` climbs.
+- **What `wss-mux` is doing.** That connection sent inbound frames
+  (`auth` / `subscribe` / `unsubscribe`) faster than
+  `WSS_MUX_INBOUND_RATE` allows — a token bucket of capacity
+  `WSS_MUX_INBOUND_BURST`. Excess frames are dropped, **keep-open**:
+  the connection stays usable and admission resumes as the bucket
+  refills.
+- **Fix.** The client should pace or batch its frames — a normal
+  `auth` plus a handful of `subscribe`s is well within the defaults, so
+  a flood usually means a buggy client. The operator can raise
+  `WSS_MUX_INBOUND_RATE` / `WSS_MUX_INBOUND_BURST` (size `BURST` to the
+  largest legitimate reconnect-resubscribe spike), or set
+  `WSS_MUX_INBOUND_RATE=0` to disable the limiter.
+
+### A reconnect storm
+
+- **Observe.** After a network blip or a rolling restart, many clients
+  reconnect at once. Some connections fail; reconnect latency spikes
+  into seconds.
+- **What `wss-mux` is doing.** A single instance's TCP accept backlog
+  cannot absorb thousands of *simultaneous* connects — the OS drops
+  SYNs and clients retransmit on a backoff. `wss-mux` does not crash or
+  leak connections; the accept path is the bottleneck. (The harness
+  measured a 10k-simultaneous herd to one instance losing ~4.5% of
+  connects with multi-second tail latency — and the *same* 10k,
+  staggered over a 250 ms window, connecting 100%.)
+- **Fix.** This one `wss-mux` cannot solve for you — it cannot
+  de-synchronize your clients. Two levers, both yours: have clients
+  **reconnect with jitter** (a random delay of a few hundred
+  milliseconds, not a lockstep retry), and **scale horizontally** so a
+  load balancer spreads the herd across instances.
+
+### A dead or unreachable peer
+
+- **Observe.** In a multi-instance fleet,
+  `wss_mux_relay_failed_total{reason="connect"}` (or `"timeout"`)
+  climbs. Producers see no slowdown.
+- **What `wss-mux` is doing.** A peer in the relay set is down or
+  unreachable. Peer-relay is best-effort and fire-and-forget: a dead
+  peer never back-pressures the producer (the `204` returns as soon as
+  the event is accepted locally) and never affects local delivery. The
+  failed relay is dropped and metered.
+- **Fix.** Usually nothing — a brief blip during scale-down is
+  expected and self-heals once discovery drops the dead pod (within
+  `WSS_MUX_PEER_DNS_REFRESH_SECS`). *Sustained* `connect` failures
+  outside a scale event are a real problem: a NetworkPolicy blocking
+  pod-to-pod traffic, or a wrong peer port — see [Symptoms → cause →
+  fix](#symptoms--cause--fix).
+
+### A saturated relay-coalescing queue
+
+- **Observe.** With relay coalescing enabled
+  (`WSS_MUX_RELAY_COALESCE_MS > 0`),
+  `wss_mux_relay_queue_dropped_total` climbs.
+- **What `wss-mux` is doing.** Producer pushes are arriving faster than
+  the coalescing flush worker drains the bounded relay queue
+  (`WSS_MUX_RELAY_QUEUE_DEPTH`). When the queue is full, whole batches
+  are dropped and metered — **never** producer back-pressure.
+  `wss_mux_relay_flushes_total` keeps advancing, so the worker is
+  alive; it simply cannot keep up.
+- **Fix.** Raise `WSS_MUX_RELAY_QUEUE_DEPTH` to ride out bursts, or
+  shorten `WSS_MUX_RELAY_COALESCE_MS` so the window flushes sooner. If
+  it is sustained, the peers themselves are slow to accept relays — see
+  the dead-peer entry above.
+
+### Reproducing these
+
+Every oddity above is a scenario in the in-repo load harness
+(`src/bin/loadgen/`, the `wss-mux-loadgen` binary). Each run drives the
+pathological condition and prints an expected-vs-observed verdict:
+
+```bash
+cargo run --bin wss-mux-loadgen -- slow-consumer
+cargo run --bin wss-mux-loadgen -- payload-cap
+cargo run --bin wss-mux-loadgen -- rate-limit
+cargo run --bin wss-mux-loadgen -- reconnect-storm   # --jitter-ms 0 for a pure herd
+cargo run --bin wss-mux-loadgen -- dead-peer
+cargo run --bin wss-mux-loadgen -- coalesce-saturate
+```
+
+For throughput, latency, and connection-count ceilings on your own
+hardware, the harness also has `throughput`, `latency`, and
+`connections` scenarios; point them at a real instance with `--target`
+for a representative number — an in-process run shares CPU with the
+load generator. Hot-path microbenchmarks are tracked over time at the
+[benchmark dashboard](https://alternet-dev.github.io/wss-mux/dev/bench/).
