@@ -16,18 +16,19 @@ jobs:
   benchmarks:
     name: benchmarks (report-only)
     runs-on: ubuntu-latest
-    # A perf hiccup must never block a merge.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run criterion benchmarks
+        # Report-only: a hiccup here must never fail the check.
+        continue-on-error: true
         # `bench = false` on the lib/bin/test targets means this runs
         # only the four criterion `[[bench]]` targets; `bencher` output
         # is the libtest-compatible format github-action-benchmark parses.
         run: cargo bench -- --output-format bencher | tee bench-output.txt
       - name: Publish + track results
+        continue-on-error: true
         uses: benchmark-action/github-action-benchmark@v1
         with:
           name: wss-mux benchmarks
