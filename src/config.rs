@@ -201,6 +201,39 @@ pub enum ConfigError {
 }
 
 impl Config {
+    /// Construct a `Config` programmatically from the genuinely-required
+    /// fields, with every optional knob at its documented default (the
+    /// same `DEFAULT_*` constants `from_env` uses). The production path
+    /// is `from_env`; `new` is for embedders and for tests/benches/the
+    /// load harness that build a `Config` directly — so adding a new
+    /// optional field stays a one-file change here, never a hand-edited
+    /// literal scattered across modules.
+    pub fn new(
+        push_auth_token: String,
+        handshake_keys: HandshakeKeyConfig,
+        manifest_path: PathBuf,
+    ) -> Config {
+        Config {
+            listen_addr: DEFAULT_LISTEN_ADDR
+                .parse()
+                .expect("DEFAULT_LISTEN_ADDR is a valid socket address"),
+            push_auth_token,
+            handshake_keys,
+            oidc: None,
+            manifest_path,
+            queue_depth: DEFAULT_QUEUE_DEPTH,
+            envelope_stream_path: DEFAULT_ENVELOPE_STREAM_PATH.to_string(),
+            envelope_key_path: DEFAULT_ENVELOPE_KEY_PATH.to_string(),
+            envelope_payload_path: DEFAULT_ENVELOPE_PAYLOAD_PATH.to_string(),
+            inbound_rate_per_sec: DEFAULT_INBOUND_RATE,
+            inbound_burst: DEFAULT_INBOUND_BURST,
+            relay_coalesce_ms: DEFAULT_RELAY_COALESCE_MS,
+            relay_coalesce_max_events: DEFAULT_RELAY_COALESCE_MAX_EVENTS,
+            relay_queue_depth: DEFAULT_RELAY_QUEUE_DEPTH,
+            peers: PeerConfig::default(),
+        }
+    }
+
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_getter(|k| std::env::var(k).ok())
     }

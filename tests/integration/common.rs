@@ -25,32 +25,21 @@ pub const ED25519_PUB_PEM: &str = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAG
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub fn test_config() -> Config {
-    Config {
-        listen_addr: "127.0.0.1:0".parse().unwrap(),
-        push_auth_token: PUSH_TOKEN.into(),
-        handshake_keys: wss_mux::config::HandshakeKeyConfig {
+    // `Config::new` defaults all optional knobs (coalescing off, peer
+    // relay inert, default queue depth). Tests only override rate
+    // limiting — off so the fast-sending suites aren't throttled; the
+    // rate-limit suite builds its own config.
+    let mut c = Config::new(
+        PUSH_TOKEN.into(),
+        wss_mux::config::HandshakeKeyConfig {
             hs256_secret: Some(SIGNING_KEY.into()),
             ed25519_public_pem: None,
         },
-        oidc: None,
-        manifest_path: "test.yaml".into(),
-        queue_depth: 1024,
-        envelope_stream_path: "stream".into(),
-        envelope_key_path: "key".into(),
-        envelope_payload_path: "payload".into(),
-        // Rate limiting off by default so the existing fast-sending tests
-        // aren't throttled; the rate-limit suite builds its own config.
-        inbound_rate_per_sec: 0,
-        inbound_burst: 0,
-        // Coalescing off by default in tests ⇒ relay path byte-identical
-        // to pre-v0.5; the coalescing suite builds its own config.
-        relay_coalesce_ms: 0,
-        relay_coalesce_max_events: 1024,
-        relay_queue_depth: 1024,
-        // Peer relay defaults are inert in-test (no resolvable peers),
-        // keeping every existing suite byte-identical to single-instance.
-        peers: wss_mux::config::PeerConfig::default(),
-    }
+        "test.yaml".into(),
+    );
+    c.inbound_rate_per_sec = 0;
+    c.inbound_burst = 0;
+    c
 }
 
 pub fn test_state() -> AppState {

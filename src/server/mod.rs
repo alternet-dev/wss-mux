@@ -318,26 +318,18 @@ mod tests {
     use super::*;
 
     fn cfg() -> Config {
-        Config {
-            listen_addr: "127.0.0.1:0".parse().unwrap(),
-            push_auth_token: "t".into(),
-            handshake_keys: crate::config::HandshakeKeyConfig {
+        let mut c = Config::new(
+            "t".into(),
+            crate::config::HandshakeKeyConfig {
                 hs256_secret: Some("k".into()),
                 ed25519_public_pem: None,
             },
-            oidc: None,
-            manifest_path: "p".into(),
-            queue_depth: 8,
-            envelope_stream_path: "stream".into(),
-            envelope_key_path: "key".into(),
-            envelope_payload_path: "payload".into(),
-            inbound_rate_per_sec: 0,
-            inbound_burst: 0,
-            relay_coalesce_ms: 0,
-            relay_coalesce_max_events: 1024,
-            relay_queue_depth: 1024,
-            peers: crate::config::PeerConfig::default(),
-        }
+            "p".into(),
+        );
+        c.queue_depth = 8;
+        c.inbound_rate_per_sec = 0;
+        c.inbound_burst = 0;
+        c
     }
 
     fn manifest(yaml: &str) -> Manifest {
