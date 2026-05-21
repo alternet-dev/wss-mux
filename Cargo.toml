@@ -9,6 +9,10 @@ repository = "https://github.com/alternet-dev/wss-mux"
 readme = "README.md"
 keywords = ["websocket", "multiplexer", "pubsub", "fanout", "realtime"]
 categories = ["network-programming", "web-programming::websocket"]
+# Both binaries are declared explicitly below; disable bin
+# auto-discovery so `src/bin/loadgen/main.rs` is not also picked up as a
+# bare `loadgen` target alongside the explicit `wss-mux-loadgen`.
+autobins = false
 
 [lib]
 name = "wss_mux"
@@ -21,6 +25,13 @@ bench = false
 [[bin]]
 name = "wss-mux"
 path = "src/main.rs"
+bench = false
+
+[[bin]]
+name = "wss-mux-loadgen"
+path = "src/bin/loadgen/main.rs"
+# Load/stress harness. `bench = false` keeps `cargo bench` from also
+# running it under the libtest harness (only the criterion benches run).
 bench = false
 
 [[test]]
