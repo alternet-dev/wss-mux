@@ -1,0 +1,47 @@
+name: Perf
+
+# Report-only. This lives in its own workflow (not a job in ci.yml) so
+# branch protection — which lists ci.yml's jobs — can never gate on it.
+on:
+  push:
+    branches: [trunk]
+  pull_request:
+    branches: [trunk]
+
+permissions:
+  contents: write # push benchmark history to the gh-pages branch
+  pull-requests: write # comment the per-PR delta
+
+jobs:
+  benchmarks:
+    name: benchmarks (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run criterion benchmarks
+        # Report-only: a hiccup here must never fail the check.
+        continue-on-error: true
+        # `bench = false` on the lib/bin/test targets means this runs
+        # only the four criterion `[[bench]]` targets; `bencher` output
+        # is the libtest-compatible format github-action-benchmark parses.
+        run: cargo bench -- --output-format bencher | tee bench-output.txt
+      - name: Publish + track results
+        continue-on-error: true
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: wss-mux benchmarks
+          tool: cargo
+          output-file-path: bench-output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench
+          # Persist the trend only on trunk; on PRs just compare + comment.
+          auto-push: ${{ github.event_name == 'push' }}
+          comment-on-alert: true
+          summary-always: true
+          # Never fail the build — CI runners are perf-variable; the
+          # alert/PR-comment is informational, the trend is what matters.
+          fail-on-alert: false
+          alert-threshold: '200%'
