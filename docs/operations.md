@@ -242,7 +242,7 @@ across the fleet.
 
 ## Why peer-relay and not Redis
 
-The roadmap originally slated a Redis pub/sub adapter for
+An early design slated a Redis pub/sub adapter for
 cross-instance fanout. It was rejected:
 
 - **Infrastructure-agnostic pitch.** Redis imposes external infra to
@@ -257,7 +257,7 @@ cross-instance fanout. It was rejected:
   no failover semantics to reason about.
 
 State replication beyond this optional event relay remains an explicit
-non-goal. Durable subscriptions are **not** on the roadmap — they
+non-goal. Durable subscriptions are **deliberately excluded** — they
 contradict the stateless, ephemeral identity; durability is the
 producer's responsibility (see `docs/concepts.md`).
 
