@@ -192,7 +192,6 @@ covered end-to-end in [docs/operations.md](docs/operations.md).
 3. [docs/embedding.md](docs/embedding.md) — how to integrate
 4. [docs/architecture.md](docs/architecture.md) — implementation shape
 5. [docs/operations.md](docs/operations.md) — running it (incl. multi-instance)
-6. [docs/roadmap.md](docs/roadmap.md) — what's in each version
 
 LLM agents: start with [AGENTS.md](AGENTS.md).
 

@@ -20,8 +20,7 @@ required.
 4. [docs/architecture.md](docs/architecture.md) — implementation shape
 5. [docs/embedding.md](docs/embedding.md) — integration patterns
 6. [docs/operations.md](docs/operations.md) — running it (multi-instance)
-7. [docs/roadmap.md](docs/roadmap.md) — versioned plan
-8. Source: `src/main.rs` → `src/server/` → `src/auth.rs` +
+7. Source: `src/main.rs` → `src/server/` → `src/auth.rs` +
    `src/oidc.rs` (token validation) → `src/registry.rs` +
    `src/dispatcher.rs` → `src/peers/` (cross-instance relay)
 
@@ -57,8 +56,7 @@ required.
   full non-k8s escape hatches). Deployment-specific patterns belong in
   `docs/operations.md` / `docs/embedding.md`, not hard-coded in `src/`.
 - **No silent contract changes.** Wire frame additions, manifest
-  schema changes, and token-claim changes go through `docs/protocol.md`
-  + roadmap update.
+  schema changes, and token-claim changes go through `docs/protocol.md`.
 - **No new external-infrastructure dependency.** No broker, database,
   or other service the operator must run. This is the hard line that
   rejected the Redis adapter; peer-relay rides the existing HTTP stack
@@ -66,7 +64,7 @@ required.
   cross this line: it is opt-in and validates against the operator's
   *existing* identity provider — `wss-mux` mandates no new service.
 - **No features that contradict the at-most-once / ephemeral
-  contract** without an explicit version bump and roadmap entry.
+  contract** without an explicit version bump.
 
 ## Build, test, lint
 

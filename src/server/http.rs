@@ -32,11 +32,11 @@ fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
 }
 
 /// Shared ingest core for every event entry point. Validates each
-/// envelope's stream against the current manifest (all-or-nothing, per
-/// docs/roadmap.md), dispatches locally, and — only for a producer
-/// origin — spawns a best-effort relay of the canonical batch to the
-/// discovered peers. A peer relay receipt is never re-relayed: the
-/// distinct entry path *is* the structural one-hop loop guard.
+/// envelope's stream against the current manifest (all-or-nothing),
+/// dispatches locally, and — only for a producer origin — spawns a
+/// best-effort relay of the canonical batch to the discovered peers.
+/// A peer relay receipt is never re-relayed: the distinct entry path
+/// *is* the structural one-hop loop guard.
 fn accept_events(
     state: &AppState,
     events: Vec<EventEnvelope>,
@@ -104,11 +104,11 @@ pub async fn push_event(
 }
 
 /// Batch push. The wrapper is always `{"events": [...]}`; each element is
-/// interpreted with the configured envelope paths. All-or-nothing per
-/// docs/roadmap.md: any element failing envelope extraction fails the
-/// whole batch with 400; any referencing a stream not in the manifest
-/// fails with 404. Otherwise all events are dispatched and the response is
-/// 204 with no per-event status.
+/// interpreted with the configured envelope paths. All-or-nothing: any
+/// element failing envelope extraction fails the whole batch with 400;
+/// any referencing a stream not in the manifest fails with 404.
+/// Otherwise all events are dispatched and the response is 204 with no
+/// per-event status.
 pub async fn push_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
