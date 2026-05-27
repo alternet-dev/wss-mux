@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779868465572,
+  "lastUpdate": 1779868790520,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -3059,6 +3059,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
             "range": "± 1",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "evan@macgregor.llc",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "distinct": true,
+          "id": "5b9e2831b2aa27daed8e869ba43ac7c1c49265be",
+          "message": "ci(release): switch homebrew-tap to GitHub App auth (#78)\n\nReplaces the static HOMEBREW_TAP_TOKEN PAT with the GitHub App token\nflow. The App mints a short-lived token (~1 hour) scoped to just the\nhomebrew-tap repo, then the checkout + push use that token instead of\na long-lived PAT.\n\nSetup required at org level (already present):\n\n- vars.HOMEBREW_TAP_APP_ID — the App's numeric id (non-sensitive).\n- secrets.HOMEBREW_TAP_APP_PRIVATE_KEY — the App's signing key (PEM).\n- wss-mux added to the App's installed repositories AND to the access\n  list for the org variable/secret.\n\nResolves and uses the App's bot user identity for the commit: bot\nuser id resolved via GitHub API, then used in `git config user.email`.\nThe committer attribution reflects the App, not the generic\ngithub-actions[bot] identity.\n\nAfter this lands and the next release succeeds, the repo-level\nHOMEBREW_TAP_TOKEN secret can be deleted.",
+          "timestamp": "2026-05-27T01:51:01-06:00",
+          "tree_id": "b38c1d2803d8ecf913c62d64c6fa989207cd7f39",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/5b9e2831b2aa27daed8e869ba43ac7c1c49265be"
+        },
+        "date": 1779868789421,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 250,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1461,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3180,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 26512,
+            "range": "± 45",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 349,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 3118,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 35581,
+            "range": "± 1403",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 515853,
+            "range": "± 26463",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 6239852,
+            "range": "± 366636",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 147,
+            "range": "± 212",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 122,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 36384,
+            "range": "± 385",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 145,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 41,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 64,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 67,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 408,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 83,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4122,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 123,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 40773,
+            "range": "± 60",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 685,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 414898,
+            "range": "± 1589",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 5944,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 121,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
