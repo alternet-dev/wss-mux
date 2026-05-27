@@ -1,0 +1,58 @@
+{
+  "name": "@wss-mux/client",
+  "version": "0.5.1",
+  "description": "Browser TypeScript client for wss-mux WebSocket multiplexer",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/client.test.mjs tests/reconnect.test.mjs tests/e2e.test.mjs",
+    "test:e2e": "WSS_MUX_E2E=1 node --test tests/e2e.test.mjs",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "ws": "^8.16.0",
+    "@types/ws": "^8.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alternet-dev/wss-mux.git",
+    "directory": "clients/typescript"
+  },
+  "homepage": "https://github.com/alternet-dev/wss-mux/tree/trunk/clients/typescript#readme",
+  "bugs": {
+    "url": "https://github.com/alternet-dev/wss-mux/issues"
+  },
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "websocket",
+    "wss-mux",
+    "realtime",
+    "multiplexer",
+    "pubsub"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false
+}
