@@ -18,7 +18,7 @@ impl Scheme {
 }
 
 /// A resolved peer's base URL. The relay path is appended by the caller
-/// (`{base}/internal/v1/relay`).
+/// (`{base}/internal/relay`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerUrl {
     pub scheme: Scheme,

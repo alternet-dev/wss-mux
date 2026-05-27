@@ -61,7 +61,7 @@ pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
     let state = state.clone();
     tokio::spawn(async move {
         for peer in peers.iter() {
-            let url = format!("{}/internal/v1/relay", peer.base());
+            let url = format!("{}/internal/relay", peer.base());
             let result = client
                 .post(&url)
                 .bearer_auth(&token)
@@ -171,7 +171,7 @@ async fn flush_to_peers(state: &AppState, events: Vec<EventEnvelope>, max_events
             continue;
         }
         let sends = peers.iter().map(|p| {
-            let url = format!("{}/internal/v1/relay", p.base());
+            let url = format!("{}/internal/relay", p.base());
             let client = client.clone();
             let token = token.clone();
             let body = body.clone();
@@ -304,7 +304,7 @@ mod tests {
         let events2 = events.clone();
 
         let app = axum::Router::new().route(
-            "/internal/v1/relay",
+            "/internal/relay",
             axum::routing::post(move |body: axum::body::Bytes| {
                 let posts2 = posts2.clone();
                 let events2 = events2.clone();

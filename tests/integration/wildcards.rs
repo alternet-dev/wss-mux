@@ -68,7 +68,7 @@ async fn trailing_wildcard_admits_matching_prefix() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages", "payload": {"ok": true}

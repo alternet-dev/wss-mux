@@ -23,7 +23,7 @@ async fn fake_peer() -> (SocketAddr, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let events = Arc::new(AtomicUsize::new(0));
     let (p, e) = (posts.clone(), events.clone());
     let app = axum::Router::new().route(
-        "/internal/v1/relay",
+        "/internal/relay",
         axum::routing::post(move |body: axum::body::Bytes| {
             let (p, e) = (p.clone(), e.clone());
             async move {
@@ -56,7 +56,7 @@ async fn coalescing_batches_many_pushes_into_few_posts() {
     let http = reqwest::Client::new();
     for i in 0..20 {
         let r = http
-            .post(format!("http://{addr_a}/v1/events"))
+            .post(format!("http://{addr_a}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({
                 "stream": "chat_messages", "key": "room-42",
@@ -87,7 +87,7 @@ async fn coalescing_off_is_one_post_per_push() {
     let addr_a = spawn_server(state.clone()).await;
     let http = reqwest::Client::new();
     for i in 0..5 {
-        http.post(format!("http://{addr_a}/v1/events"))
+        http.post(format!("http://{addr_a}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({
                 "stream": "chat_messages", "key": "room-42",

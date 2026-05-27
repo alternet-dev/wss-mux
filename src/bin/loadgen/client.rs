@@ -14,11 +14,11 @@ use wss_mux::envelope::{ClientFrame, ServerFrame};
 
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// Open a WebSocket to `<ws_base>/v1/stream`, negotiating the JSON
+/// Open a WebSocket to `<ws_base>/stream`, negotiating the JSON
 /// `wss-mux` subprotocol — the server rejects a connection that
 /// offers none.
 pub async fn connect(ws_base: &str) -> Result<Ws> {
-    let url = format!("{}/v1/stream", ws_base.trim_end_matches('/'));
+    let url = format!("{}/stream", ws_base.trim_end_matches('/'));
     let mut request = url
         .into_client_request()
         .context("build WebSocket request")?;

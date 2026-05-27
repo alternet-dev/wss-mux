@@ -45,7 +45,7 @@ async fn push_over_cap_is_413_and_metered() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"stream": "capped", "payload": oversized()}))
         .send()
@@ -71,7 +71,7 @@ async fn push_under_cap_is_204() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"stream": "capped", "payload": {"a": 1}}))
         .send()
@@ -112,7 +112,7 @@ async fn batch_with_one_oversized_event_rejects_whole_batch() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"events": [
             {"stream": "capped", "payload": {"first": true}},
@@ -126,7 +126,7 @@ async fn batch_with_one_oversized_event_rejects_whole_batch() {
     // All-or-nothing: the in-cap first event must NOT have been
     // dispatched. Push a sentinel and prove it arrives first.
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"stream": "capped", "payload": {"sentinel": true}}))
         .send()
@@ -156,7 +156,7 @@ async fn relay_receive_enforces_cap_defense_in_depth() {
     }));
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .body(body)
         .send()

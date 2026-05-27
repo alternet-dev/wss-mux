@@ -4,8 +4,8 @@ A single binary built around a few small components.
 
 ```
          +-----------------+
-         |   HTTP server   |  POST /v1/events
-         |                 |  POST /v1/events/batch
+         |   HTTP server   |  POST /events
+         |                 |  POST /events/batch
          +--------+--------+  GET  /healthz
                   |           GET  /readyz
                   v
@@ -20,7 +20,7 @@ A single binary built around a few small components.
                   ^
                   |
          +-----------------+
-         |    WS server    |  /v1/stream
+         |    WS server    |  /stream
          |                 |  per-connection task
          +-----------------+
 ```
@@ -29,8 +29,8 @@ A single binary built around a few small components.
 
 ### HTTP server
 
-Accepts producer pushes on `POST /v1/events` and the batched
-`POST /v1/events/batch`. Bearer-token authenticated against a shared
+Accepts producer pushes on `POST /events` and the batched
+`POST /events/batch`. Bearer-token authenticated against a shared
 secret. Validates the event envelope, forwards to the dispatcher.
 Stateless.
 
@@ -66,7 +66,7 @@ scans linearly within a stream.
 
 ### WS server
 
-Accepts WebSocket connections at `/v1/stream`. For each connection:
+Accepts WebSocket connections at `/stream`. For each connection:
 
 - One reader task handles client frames (`auth`, `subscribe`,
   `unsubscribe`) and, on subscribe, creates that subscription's

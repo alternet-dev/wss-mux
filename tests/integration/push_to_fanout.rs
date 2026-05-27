@@ -46,7 +46,7 @@ async fn push_event_fans_out_to_subscribed_clients() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -83,7 +83,7 @@ async fn unknown_stream_push_returns_404() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "nope",
@@ -102,7 +102,7 @@ async fn push_without_bearer_token_is_401() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
             "payload": {}
@@ -120,7 +120,7 @@ async fn push_with_wrong_bearer_token_is_401() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", "Bearer wrong-token")
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -164,7 +164,7 @@ async fn batch_push_delivers_all_events() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "events": [
@@ -196,7 +196,7 @@ async fn batch_push_without_bearer_token_is_401() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .json(&serde_json::json!({
             "events": [{"stream": "chat_messages", "payload": {}}]
         }))
@@ -237,7 +237,7 @@ async fn batch_push_with_unknown_stream_in_any_event_is_404() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "events": [
@@ -264,7 +264,7 @@ async fn batch_push_with_malformed_envelope_is_400() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "events": [
@@ -285,7 +285,7 @@ async fn batch_push_with_empty_events_array_is_204() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"events": []}))
         .send()
@@ -302,7 +302,7 @@ async fn push_event_without_manifest_returns_503() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -321,7 +321,7 @@ async fn batch_push_without_manifest_returns_503() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "events": [{"stream": "chat_messages", "payload": {}}]
@@ -337,7 +337,7 @@ async fn ws_without_subprotocol_is_rejected() {
     let state = test_state_with_manifest();
     let addr = spawn_server(state).await;
 
-    let url = format!("ws://{addr}/v1/stream");
+    let url = format!("ws://{addr}/stream");
     let req = url.into_client_request().expect("request");
     let res = tokio_tungstenite::connect_async(req).await;
     assert!(res.is_err(), "connect without subprotocol should fail");

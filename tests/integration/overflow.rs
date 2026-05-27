@@ -54,7 +54,7 @@ async fn steady_consumer_receives_far_more_than_queue_depth() {
     let total = 20; // 5x the cap
     for i in 0..total {
         let resp = http
-            .post(format!("http://{addr}/v1/events"))
+            .post(format!("http://{addr}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({
                 "stream": "chat_messages",
@@ -125,7 +125,7 @@ async fn global_queue_depth_zero_is_unbounded_no_drops() {
     let total = 200;
     for i in 0..total {
         let resp = http
-            .post(format!("http://{addr}/v1/events"))
+            .post(format!("http://{addr}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({
                 "stream": "chat_messages",
@@ -219,7 +219,7 @@ async fn sighup_queue_depth_change_resizes_an_existing_subscription() {
     let http = reqwest::Client::new();
     for i in 0..50 {
         let r = http
-            .post(format!("http://{addr}/v1/events"))
+            .post(format!("http://{addr}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({"stream":"chat_messages","payload":{"i":i}}))
             .send()

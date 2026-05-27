@@ -116,7 +116,7 @@ async fn oidc_token_authenticates_maps_groups_and_receives_event() {
 
     let http = reqwest::Client::new();
     let r = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({"stream":"chat_messages","payload":{"hi":true}}))
         .send()

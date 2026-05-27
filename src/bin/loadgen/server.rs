@@ -30,7 +30,7 @@ streams:
 
 /// One reachable wss-mux instance.
 struct Instance {
-    /// `http://host:port` — REST surface (`/v1/events`, `/metrics`).
+    /// `http://host:port` — REST surface (`/events`, `/metrics`).
     base_url: String,
     /// `ws://host:port` (or `wss://…`) — the WebSocket endpoint.
     ws_url: String,

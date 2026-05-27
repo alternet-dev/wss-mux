@@ -290,10 +290,10 @@ pub fn build_app(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(http::metrics))
-        .route("/v1/events", post(http::push_event))
-        .route("/v1/events/batch", post(http::push_batch))
-        .route("/internal/v1/relay", post(http::relay_receive))
-        .route("/v1/stream", get(ws::ws_handler))
+        .route("/events", post(http::push_event))
+        .route("/events/batch", post(http::push_batch))
+        .route("/internal/relay", post(http::relay_receive))
+        .route("/stream", get(ws::ws_handler))
         .with_state(state)
 }
 

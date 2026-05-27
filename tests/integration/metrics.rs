@@ -73,7 +73,7 @@ async fn dispatched_counter_increments_on_delivery() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
