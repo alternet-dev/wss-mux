@@ -185,7 +185,7 @@ jobs:
             /tmp/binaries/*.tar.gz \
             /tmp/binaries/*.sha256
 
-  # ---------- npm publish for @wss-mux/client ----------
+  # ---------- npm publish for @alternet/wss-mux-client ----------
 
   npm-publish:
     name: npm-publish
