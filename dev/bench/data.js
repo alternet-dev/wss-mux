@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779869058614,
+  "lastUpdate": 1779870805033,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -3598,6 +3598,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3e6a596e012387ba2ba27d17e3d2b1cf4c781704",
+          "message": "fix(routes)!: drop the `z` from health/ready probes (#81)\n\nBREAKING (operator-visible): liveness/readiness probe routes lose\ntheir stylistic `z` suffix.\n\n  /healthz → /health\n  /readyz  → /ready\n\nThe `*z` convention is borrowed from Google's internal `/varz`-style\npages; outside that lineage it's pure noise. Now that we're also\ndropping URL-path versioning (`/v1/...` in #79), it makes sense to\nclean the rest of the public route surface at the same time.\n\nOperator impact: Kubernetes liveness/readiness probes pointed at\n`/healthz`/`/readyz` need their paths updated to `/health`/`/ready`.\nThe docs/operations.md Deployment manifest in the repo is already\nupdated.\n\nSurface touched:\n\n- `src/server/mod.rs` — Router registrations and handler functions.\n- `tests/integration/{healthz.rs,readyz.rs}` renamed to\n  `{health.rs,ready.rs}` (file + module name + test function names).\n- `tests/integration/main.rs` — module registrations.\n- `src/main.rs`, `docs/{architecture,operations,embedding}.md`, and\n  `README.md` — prose references.\n\n## Verification\n\n- `cargo build --all-targets` — green.\n- `cargo test --all-targets` — all tests pass on the new paths.\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.\n\nShips as part of v0.5.3 (still publishing — see in-flight tag).",
+          "timestamp": "2026-05-27T02:26:30-06:00",
+          "tree_id": "98eb44bcc3512ab18105417fdc439522159415b6",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/3e6a596e012387ba2ba27d17e3d2b1cf4c781704"
+        },
+        "date": 1779870804525,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 245,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1632,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3923,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29379,
+            "range": "± 267",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 325,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2381,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29623,
+            "range": "± 2100",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 343218,
+            "range": "± 30918",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3648915,
+            "range": "± 171588",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 138,
+            "range": "± 361",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 133,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31717,
+            "range": "± 266",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 158,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 73,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 355,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 101,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2297,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 147,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 42743,
+            "range": "± 570",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 666,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 363726,
+            "range": "± 3042",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7317,
+            "range": "± 69",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 135,
             "range": "± 0",
             "unit": "ns/iter"
           }
