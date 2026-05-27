@@ -1,9 +1,9 @@
-// Minimal browser usage example for @wss-mux/client.
+// Minimal browser usage example for @alternet/wss-mux-client.
 //
 // Run with a bundler (vite, webpack, esbuild) or directly in a browser
 // environment that supports ES modules.
 
-import { WssMuxClient, ProtocolError } from "@wss-mux/client";
+import { WssMuxClient, ProtocolError } from "@alternet/wss-mux-client";
 
 async function main() {
   // The token-source the SDK calls. Provide your OIDC access-token
