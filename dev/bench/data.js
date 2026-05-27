@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779863693000,
+  "lastUpdate": 1779864913706,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -2519,6 +2519,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 134,
             "range": "± 2",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "61abdb49618d6b9e4f4893c20081e24b9c55907c",
+          "message": "chore(ci): switch npm-publish to Trusted Publishing via OIDC (#76)\n\nReplaces the static NPM_TOKEN-based publish with npm's Trusted\nPublishing — the runner mints a short-lived OIDC token that npm\nexchanges for publish capability via the trusted publisher configured\non the @alternet/wss-mux-client package settings page.\n\nChanges to the npm-publish job:\n\n- Add `permissions: id-token: write` so GitHub Actions issues the\n  workflow an OIDC identity token.\n- Bump `node-version` from \"20\" to \"22\". npm Trusted Publishing\n  requires npm >= 11.5; Node 22 ships npm 11.x by default, whereas\n  Node 20's bundled npm 10.x is too old.\n- Change `npm publish` to `npm publish --provenance --access public`.\n  --provenance attaches a signed attestation linking the published\n  version to this workflow run (visible as a \"Provenance\" badge on\n  npmjs.com); it's required when publishing via Trusted Publishing.\n- Drop the NODE_AUTH_TOKEN env var. The static NPM_TOKEN secret is\n  no longer used by this job.\n\nAfter this lands and the next release tag publishes successfully via\nOIDC, the NPM_TOKEN repo secret can be deleted and the corresponding\nclassic automation token on npmjs.com revoked.",
+          "timestamp": "2026-05-27T00:48:22-06:00",
+          "tree_id": "8a66c2e509f9d597f5206b808548252fcd477647",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/61abdb49618d6b9e4f4893c20081e24b9c55907c"
+        },
+        "date": 1779864912405,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 248,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1651,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3782,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29179,
+            "range": "± 549",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 327,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2366,
+            "range": "± 48",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29215,
+            "range": "± 1373",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 365462,
+            "range": "± 26824",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3894051,
+            "range": "± 203775",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 139,
+            "range": "± 372",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31914,
+            "range": "± 113",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 158,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 72,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 335,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2277,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 150,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 43160,
+            "range": "± 272",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 659,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 382746,
+            "range": "± 9931",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7091,
+            "range": "± 133",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 133,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
