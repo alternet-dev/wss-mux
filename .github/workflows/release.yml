@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -17,10 +17,8 @@ env:
   REGISTRY_IMAGE: ghcr.io/alternet-dev/wss-mux
 
 jobs:
-  # Build the per-arch image on a native runner, push it by digest, and
-  # publish the digest as an artifact. arm64 via QEMU is ~20× the native
-  # compile time; with `ubuntu-24.04-arm` available on public repos, both
-  # arches build natively in parallel.
+  # ---------- Docker images (existing) ----------
+
   build:
     name: build (${{ matrix.arch }})
     strategy:
@@ -71,7 +69,6 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  # Stitch the per-arch digests into a single manifest list and tag it.
   manifest:
     name: manifest
     needs: build
@@ -105,3 +102,156 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf "$REGISTRY_IMAGE@sha256:%s " *)
+
+  # ---------- Server binaries for GitHub Release + Homebrew ----------
+
+  build-binaries:
+    name: build-binary (${{ matrix.target }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            runner: macos-13
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$TARGET" --bin wss-mux
+
+      - name: Package tarball
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          STAGE="wss-mux-${REF_NAME}-${TARGET}"
+          mkdir -p "dist/${STAGE}"
+          cp "target/${TARGET}/release/wss-mux" "dist/${STAGE}/"
+          cp LICENSE-MIT LICENSE-APACHE README.md "dist/${STAGE}/"
+          tar -C dist -czf "dist/${STAGE}.tar.gz" "${STAGE}"
+          shasum -a 256 "dist/${STAGE}.tar.gz" | tee "dist/${STAGE}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+  # ---------- GitHub Release with binary tarballs ----------
+
+  github-release:
+    name: github-release
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/binaries
+          pattern: binary-*
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$REF_NAME" \
+            --title "$REF_NAME" \
+            --generate-notes \
+            /tmp/binaries/*.tar.gz \
+            /tmp/binaries/*.sha256
+
+  # ---------- npm publish for @alternet/wss-mux-client ----------
+
+  npm-publish:
+    name: npm-publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/typescript
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish
+
+  # ---------- Homebrew tap formula update ----------
+
+  homebrew-tap:
+    name: homebrew-tap
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: alternet-dev/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render formula
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bash source/scripts/release/render-homebrew-formula.sh \
+            "$REF_NAME" \
+            "$REPO" \
+            > tap/Formula/wss-mux.rb
+
+      - name: Commit + push to tap
+        working-directory: tap
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/wss-mux.rb
+          if git diff --cached --quiet; then
+            echo "no formula change"
+            exit 0
+          fi
+          git commit -m "wss-mux $REF_NAME"
+          git push
