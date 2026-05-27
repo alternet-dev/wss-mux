@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779868048264,
+  "lastUpdate": 1779868465572,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -2879,6 +2879,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 135,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0831285e6d2e87dd0b9fc0e1091da0d07f58fcde",
+          "message": "ci(release): switch homebrew-tap to GitHub App auth (match wavefront) (#78)\n\nReplaces the static HOMEBREW_TAP_TOKEN PAT with the GitHub App token\nflow already used by alternet-dev/wavefront. The App mints a short-\nlived token (~1 hour) scoped to just the homebrew-tap repo, then the\ncheckout + push use that token instead of a long-lived PAT.\n\nSetup required at org level (already present, per wavefront's usage):\n\n- vars.HOMEBREW_TAP_APP_ID — the App's numeric id (non-sensitive).\n- secrets.HOMEBREW_TAP_APP_PRIVATE_KEY — the App's signing key (PEM).\n- wss-mux added to the App's installed repositories AND to the access\n  list for the org variable/secret.\n\nResolves and uses the App's bot user identity for the commit (matching\nwavefront's pattern: bot user id resolved via GitHub API, then used\nin `git config user.email`). The committer attribution reflects the\nApp, not the generic github-actions[bot] identity.\n\nAfter this lands and the next release succeeds, the repo-level\nHOMEBREW_TAP_TOKEN secret can be deleted.",
+          "timestamp": "2026-05-27T01:47:34-06:00",
+          "tree_id": "b38c1d2803d8ecf913c62d64c6fa989207cd7f39",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/0831285e6d2e87dd0b9fc0e1091da0d07f58fcde"
+        },
+        "date": 1779868465277,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 317,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1928,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3967,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33592,
+            "range": "± 60",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 330,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2360,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28323,
+            "range": "± 1802",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 416708,
+            "range": "± 32287",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4874380,
+            "range": "± 553921",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 160,
+            "range": "± 448",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 140,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33250,
+            "range": "± 193",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 167,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 17,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 80,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 81,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 334,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3746,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38365,
+            "range": "± 161",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 374695,
+            "range": "± 10488",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6327,
+            "range": "± 46",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
