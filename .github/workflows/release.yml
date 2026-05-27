@@ -253,11 +253,30 @@ jobs:
         with:
           path: source
 
+      - name: Mint tap-write token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: alternet-dev
+          repositories: homebrew-tap
+
+      - name: Resolve App bot user id
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "user-id=${user_id}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout tap
         uses: actions/checkout@v4
         with:
           repository: alternet-dev/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: tap
 
       - name: Render formula
@@ -275,10 +294,12 @@ jobs:
         working-directory: tap
         env:
           REF_NAME: ${{ github.ref_name }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          BOT_USER_ID: ${{ steps.bot.outputs.user-id }}
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${BOT_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
           git add Formula/wss-mux.rb
           if git diff --cached --quiet; then
             echo "no formula change"
