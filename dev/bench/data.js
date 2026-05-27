@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779850724048,
+  "lastUpdate": 1779850830075,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -1618,6 +1618,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 2",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "59bfd2d410da777f38abc4d6d3059795c4102a3f",
+          "message": "feat(client): add @wss-mux/client TypeScript SDK (#54) (#68)\n\nBrowser TypeScript SDK wrapping the wss-mux v0.5 wire protocol, per #54.\nZero runtime dependencies; uses globalThis.WebSocket (constructor\ninjectable for non-browser hosts). Auto-reconnect with exponential\nbackoff; getToken() invoked on initial connect and on close code 4401\n(expired_token). Typed errors for the documented wss-mux error codes\nand close codes. Subscriptions are tracked locally and replayed on\nreconnect; the protocol's ack-by-absence semantics mean subscribe()\nresolves once the frame is sent, with server-side errors surfaced via\nopts.onError.\n\nNegotiates the `wss-mux` subprotocol (matching the version-less\nidentifier introduced in the wire-drop PR stacked just below). Does\nnot surface `v1` anywhere in the public API or examples; the URL is\noperator-controlled per the handshake response.\n\nTests run under node:test against a mock WebSocketServer (ws package);\none e2e test gated by WSS_MUX_E2E=1. CI workflow at\n.github/workflows/typescript-ci.yml runs typecheck + build + tests\non touches to clients/typescript/**.\n\nStacked on:\n- chore: bump version to 0.5.1\n- feat(wire)!: drop version from WebSocket subprotocol identifier\n\nPublishes to npm when the multi-registry release fanout PR also merges\nand v0.5.1 is tagged.",
+          "timestamp": "2026-05-26T20:53:55-06:00",
+          "tree_id": "5507c6780fd1e5b7b1130d9cc2caec33b5b73db8",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/59bfd2d410da777f38abc4d6d3059795c4102a3f"
+        },
+        "date": 1779850829762,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 302,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1886,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3928,
+            "range": "± 56",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33668,
+            "range": "± 79",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 330,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2472,
+            "range": "± 44",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28511,
+            "range": "± 1874",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 352451,
+            "range": "± 26380",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3829246,
+            "range": "± 228672",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 159,
+            "range": "± 444",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 140,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33653,
+            "range": "± 101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 166,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 83,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 436,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 105,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4385,
+            "range": "± 29",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 151,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 41715,
+            "range": "± 338",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 741,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 407477,
+            "range": "± 2484",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6384,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
             "range": "± 2",
             "unit": "ns/iter"
           }
