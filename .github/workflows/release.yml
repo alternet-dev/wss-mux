@@ -159,13 +159,23 @@ jobs:
           if-no-files-found: error
 
   # ---------- GitHub Release with binary tarballs ----------
+  #
+  # Body is the tag's annotation message (we write a short release-style
+  # summary into every `git tag -a`); pre-1.0 RC/beta tags (any tag
+  # containing `-`) are marked prerelease. Idempotent: re-running after
+  # a partial release uploads any missing binaries to the existing
+  # release entry rather than failing.
 
   github-release:
     name: github-release
     needs: build-binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
@@ -173,15 +183,26 @@ jobs:
           pattern: binary-*
           merge-multiple: true
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          if gh release view "$REF_NAME" >/dev/null 2>&1; then
+            echo "release $REF_NAME already exists; uploading binaries (--clobber)"
+            gh release upload "$REF_NAME" \
+              /tmp/binaries/*.tar.gz /tmp/binaries/*.sha256 \
+              --clobber
+            exit 0
+          fi
+          flags=()
+          [[ "$REF_NAME" == *-* ]] && flags+=(--prerelease)
           gh release create "$REF_NAME" \
             --title "$REF_NAME" \
-            --generate-notes \
+            --notes-from-tag \
+            --verify-tag \
+            "${flags[@]}" \
             /tmp/binaries/*.tar.gz \
             /tmp/binaries/*.sha256
 
