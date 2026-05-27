@@ -5,12 +5,18 @@ FROM rust:1-bookworm AS builder
 
 WORKDIR /build
 
-# Copy the manifest plus the source trees Cargo references. The [[test]]
-# entry in Cargo.toml points at tests/integration/main.rs, so the directory
-# has to exist even though we don't build the test target.
+# Copy the manifest plus every source tree Cargo's manifest references.
+# Cargo validates [[test]] / [[bench]] / [[bin]] target paths at manifest
+# parse time — even though we only build --bin wss-mux, every declared
+# target's source file must exist on disk or `cargo build` fails before
+# compilation starts. So:
+#   - tests/  — for [[test]] integration
+#   - benches/ — for the [[bench]] dispatch/registry/envelope/cbor targets
+#   - src/    — the actual build input, including src/bin/loadgen
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY tests ./tests
+COPY benches ./benches
 
 RUN cargo build --release --bin wss-mux
 
