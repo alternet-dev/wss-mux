@@ -198,7 +198,7 @@ Embedders should choose TTL with that tradeoff in mind:
 
 ### Binary framing (CBOR)
 
-A connection that negotiates the `wss-mux.v1.cbor` subprotocol carries
+A connection that negotiates the `wss-mux.cbor` subprotocol carries
 every frame as a CBOR (RFC 8949) binary message instead of UTF-8 JSON
 text. The frame *shapes* are identical — same `auth`/`subscribe`/
 `unsubscribe`/`event`/`error` fields — only the encoding differs. CBOR
@@ -207,7 +207,7 @@ is self-describing, so producers and clients need no shared schema.
 The codec is per-connection and fixed at negotiation: on a CBOR
 connection a text message is a wire-type mismatch and is rejected with
 `bad_frame` (close `4400`); likewise a binary message on a JSON
-(`wss-mux.v1`) connection. `bad_frame` vs `unknown_frame_type` stays
+(`wss-mux`) connection. `bad_frame` vs `unknown_frame_type` stays
 distinguishable on both codecs (a well-formed CBOR map with an
 unrecognized `type` is `unknown_frame_type`).
 
@@ -216,19 +216,27 @@ unrecognized `type` is `unknown_frame_type`).
 Clients send `Sec-WebSocket-Protocol` on the upgrade request with one
 or both of:
 
-- `wss-mux.v1` — JSON text framing.
-- `wss-mux.v1.cbor` — CBOR binary framing.
+- `wss-mux` — JSON text framing.
+- `wss-mux.cbor` — CBOR binary framing.
 
-If a client offers both, the server selects `wss-mux.v1.cbor`. The
+If a client offers both, the server selects `wss-mux.cbor`. The
 server MUST reject upgrades that don't negotiate a compatible
 subprotocol (HTTP `400`).
 
+The subprotocol identifier carries **no version** — wire-protocol
+version is implicit in the server release (per the client/server
+lockstep model) rather than negotiated. Breaking wire changes between
+releases are documented in the CHANGELOG; clients pinned to a server
+release are paired with a server that speaks the same wire.
+
 ## Forward compatibility
 
-Until v1.0, the protocol may break between minor versions. Each
-breaking change increments the subprotocol version (`wss-mux.v2`,
-etc.) so servers can serve old and new clients in parallel during
-migration.
+Until v1.0, the protocol may break between minor versions. The
+subprotocol identifier (`wss-mux` / `wss-mux.cbor`) stays stable —
+each breaking change is communicated by a server release (and matching
+client) rather than by bumping the subprotocol string. Clients pinned
+to a release version are paired with a server that speaks the matching
+wire.
 
 At v1.0 the protocol becomes stable. Subsequent additions follow
 these rules:

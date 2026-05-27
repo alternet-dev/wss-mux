@@ -15,7 +15,7 @@ use wss_mux::envelope::{ClientFrame, ServerFrame};
 pub type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Open a WebSocket to `<ws_base>/v1/stream`, negotiating the JSON
-/// `wss-mux.v1` subprotocol — the server rejects a connection that
+/// `wss-mux` subprotocol — the server rejects a connection that
 /// offers none.
 pub async fn connect(ws_base: &str) -> Result<Ws> {
     let url = format!("{}/v1/stream", ws_base.trim_end_matches('/'));
@@ -24,7 +24,7 @@ pub async fn connect(ws_base: &str) -> Result<Ws> {
         .context("build WebSocket request")?;
     request.headers_mut().insert(
         "Sec-WebSocket-Protocol",
-        "wss-mux.v1"
+        "wss-mux"
             .parse()
             .expect("static subprotocol header is valid"),
     );

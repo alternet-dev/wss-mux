@@ -22,15 +22,15 @@ use crate::ratelimit::TokenBucket;
 use crate::server::metrics::{RevokeReason, RevokeReasonLabel};
 use crate::server::AppState;
 
-pub const SUBPROTOCOL: &str = "wss-mux.v1";
-pub const SUBPROTOCOL_CBOR: &str = "wss-mux.v1.cbor";
+pub const SUBPROTOCOL: &str = "wss-mux";
+pub const SUBPROTOCOL_CBOR: &str = "wss-mux.cbor";
 
 /// Per-connection wire encoding, fixed at subprotocol negotiation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Codec {
-    /// `wss-mux.v1` — frames as UTF-8 JSON text messages.
+    /// `wss-mux` — frames as UTF-8 JSON text messages.
     Json,
-    /// `wss-mux.v1.cbor` — frames as CBOR binary messages.
+    /// `wss-mux.cbor` — frames as CBOR binary messages.
     Cbor,
 }
 
@@ -42,7 +42,7 @@ pub async fn ws_handler(
     let Some(codec) = negotiate_codec(&headers) else {
         return (
             StatusCode::BAD_REQUEST,
-            "subprotocol required: wss-mux.v1 or wss-mux.v1.cbor",
+            "subprotocol required: wss-mux or wss-mux.cbor",
         )
             .into_response();
     };
@@ -53,7 +53,7 @@ pub async fn ws_handler(
 }
 
 /// Pick the codec from the client's `Sec-WebSocket-Protocol` offer. CBOR
-/// wins if offered anywhere in the list; otherwise plain `wss-mux.v1`
+/// wins if offered anywhere in the list; otherwise plain `wss-mux`
 /// selects JSON. `None` means no compatible subprotocol was offered.
 fn negotiate_codec(headers: &HeaderMap) -> Option<Codec> {
     let offered = headers

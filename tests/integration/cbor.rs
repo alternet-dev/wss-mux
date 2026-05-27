@@ -107,7 +107,7 @@ async fn cbor_unknown_frame_type_is_distinguished_from_bad_frame() {
 
 #[tokio::test]
 async fn json_client_still_works_alongside_cbor() {
-    // Regression: the default wss-mux.v1 (JSON) path is unchanged.
+    // Regression: the default wss-mux (JSON) path is unchanged.
     let state = test_state_with_manifest();
     let addr = spawn_server(state.clone()).await;
 
