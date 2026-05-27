@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779868790520,
+  "lastUpdate": 1779868944403,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -3238,6 +3238,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 121,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d7490e8daaf37d97cf80953edad64f6a46df5d24",
+          "message": "feat(wire)!: drop version from URL routes (#55) (#79)\n\nBREAKING CHANGE: the HTTP/WebSocket routes lose their `/v1/` prefix.\nA v0.5.x client posting to `/v1/events` or upgrading at `/v1/stream`\nnow gets HTTP 404; consumers must post to `/events`, `/events/batch`,\nand upgrade at `/stream`. The peer-relay endpoint moves from\n`/internal/v1/relay` to `/internal/relay` (relevant only to operators\nconfiguring NetworkPolicies or proxies).\n\nThis is the sister change to the subprotocol-version drop that\nshipped in v0.5.1/v0.5.2 (#72) — both are part of #55's argument\nthat pre-1.0 lockstep versioning makes URL/subprotocol version fields\nredundant. Closes #55.\n\nRoute changes:\n\n  /v1/events            → /events\n  /v1/events/batch      → /events/batch\n  /v1/stream            → /stream\n  /internal/v1/relay    → /internal/relay\n\n## Surface touched\n\n- `src/server/mod.rs` — Router registrations.\n- `src/server/relay.rs` — outbound POST URL to peer's relay endpoint.\n- `src/peers/url.rs` — doc comment referencing the endpoint.\n- `src/bin/loadgen/{client,server,scenarios/mod}.rs` — loadgen client\n  URL building + REST surface comment.\n- `tests/integration/**.rs` — every integration test that posts to\n  the push endpoint or connects to the WS stream (~15 files).\n- `docs/{architecture,operations,embedding}.md` — every prose\n  reference to the routes.\n- `README.md` — surface-area mention.\n\nDownstream consumers (e.g. application-template's publisher) need\nto update their POST URLs before consuming v0.5.3+.\n\n## Verification\n\n- `cargo build --all-targets` — green.\n- `cargo test --all-targets` — all 262 tests pass on the new paths.\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.\n\n## Companion changes that are already done\n\n- Subprotocol drop (#72, v0.5.1/v0.5.2).\n- TS SDK was always path-agnostic via the consumer-supplied wssUrl —\n  no SDK code change needed.\n\n## What still needs to happen for the consumer\n\nAfter this lands and v0.5.3 ships, downstream callers need to update\ntheir POST URLs (the SDK's wssUrl is operator-set so the WS path is\nsimilarly operator-configurable from the SDK's perspective).",
+          "timestamp": "2026-05-27T01:55:18-06:00",
+          "tree_id": "5446ba50e46cf97cdab22ebd6c6e8a07e82d3d28",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/d7490e8daaf37d97cf80953edad64f6a46df5d24"
+        },
+        "date": 1779868943091,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 253,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1614,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3768,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29275,
+            "range": "± 105",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 329,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2432,
+            "range": "± 79",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29357,
+            "range": "± 1682",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 336841,
+            "range": "± 22678",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 7787556,
+            "range": "± 987299",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 146,
+            "range": "± 169",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 133,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31709,
+            "range": "± 412",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 158,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 46,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 72,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 357,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2311,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21108,
+            "range": "± 88",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 657,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 367535,
+            "range": "± 3683",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6849,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 134,
             "range": "± 0",
             "unit": "ns/iter"
           }
