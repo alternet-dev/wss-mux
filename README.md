@@ -165,7 +165,7 @@ Operational notes:
   connections; subscriptions invalidated by the new manifest get an
   `error` frame and are dropped, the connection stays open. A failed
   reload keeps the previous manifest serving.
-- **Binary framing.** Clients may negotiate the `wss-mux.v1.cbor`
+- **Binary framing.** Clients may negotiate the `wss-mux.cbor`
   subprotocol for CBOR instead of JSON; frame shapes are identical.
 - **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
   `/healthz` and `/readyz` are the liveness/readiness probes.
