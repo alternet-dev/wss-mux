@@ -44,7 +44,7 @@ async fn custom_paths_extract_and_deliver() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "meta": {"topic": "chat_messages", "room": "42"},
@@ -103,7 +103,7 @@ async fn default_paths_classic_body_still_works() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -131,7 +131,7 @@ async fn body_not_matching_custom_paths_is_400() {
     let http = reqwest::Client::new();
     // Classic body has no meta.topic → stream extraction fails → 400.
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -178,7 +178,7 @@ async fn batch_with_custom_paths_delivers_all() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events/batch"))
+        .post(format!("http://{addr}/events/batch"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "events": [

@@ -34,9 +34,9 @@ producer --push--> instance A --relay(once)--> instance B, C, ...
                        +--> A's own clients         +--> their own clients
 ```
 
-1. A producer `POST`s to any instance (`POST /v1/events`), unchanged.
+1. A producer `POST`s to any instance (`POST /events`), unchanged.
 2. That instance dispatches to its own subscribers **and** relays the
-   event once to every discovered peer (`POST /internal/v1/relay`,
+   event once to every discovered peer (`POST /internal/relay`,
    CBOR, authenticated with the same `WSS_MUX_PUSH_AUTH_TOKEN`).
 3. Each peer dispatches to *its* own subscribers and does **not**
    re-relay. The distinct receipt path is a structural one-hop guard —
@@ -290,8 +290,8 @@ skew); `timeout` means peers are overloaded or
 | All relays fail right after enabling TLS | Bad CA / client cert path or PEM | Check `WSS_MUX_PEER_CA_FILE` / `_CLIENT_CERT` / `_KEY`; startup also logs this |
 | Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; bounded by the refresh interval |
 | Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/readyz`), or the client side |
-| `413` from `POST /v1/events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
-| Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/v1/relay`; it is internal-only |
+| `413` from `POST /events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
+| Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/relay`; it is internal-only |
 | Reconnect storm on every deploy | Expected with ephemeral connections on rolling restart | Ensure clients reconnect with jittered backoff and auto-resubscribe |
 
 ## Traffic oddities — a consumer runbook
@@ -327,7 +327,7 @@ Every oddity here is reproducible with the in-repo load harness; see
 
 ### A payload over the cap
 
-- **Observe.** A producer `POST /v1/events` returns `413 Payload Too
+- **Observe.** A producer `POST /events` returns `413 Payload Too
   Large`; `wss_mux_events_rejected_total{reason="payload_too_large"}`
   climbs.
 - **What `wss-mux` is doing.** The event's payload exceeded the

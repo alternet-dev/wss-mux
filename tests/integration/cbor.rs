@@ -40,7 +40,7 @@ async fn cbor_round_trips_auth_subscribe_and_event() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -137,7 +137,7 @@ async fn json_client_still_works_alongside_cbor() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",

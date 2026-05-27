@@ -53,7 +53,7 @@ async fn ed25519_token_authenticates_and_receives_event() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/v1/events"))
+        .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages",
@@ -129,7 +129,7 @@ async fn both_keys_accept_hs256_and_ed25519_clients() {
         );
         let http = reqwest::Client::new();
         let resp = http
-            .post(format!("http://{addr}/v1/events"))
+            .post(format!("http://{addr}/events"))
             .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
             .json(&serde_json::json!({"stream":"chat_messages","payload":{"ok":1}}))
             .send()

@@ -97,7 +97,7 @@ streams:
 Publish:
 
 ```bash
-curl -X POST http://localhost:8080/v1/events \
+curl -X POST http://localhost:8080/events \
   -H "Authorization: Bearer <push-token>" \
   -H "Content-Type: application/json" \
   -d '{"stream":"chat_messages","key":"room-42","payload":{"text":"hi"}}'
@@ -106,7 +106,7 @@ curl -X POST http://localhost:8080/v1/events \
 Subscribe (client):
 
 ```javascript
-const ws = new WebSocket("ws://localhost:8080/v1/stream");
+const ws = new WebSocket("ws://localhost:8080/stream");
 ws.onopen = () =>
   ws.send(JSON.stringify({ type: "auth", token: "<jwt>" }));
 ws.onmessage = (m) => {
@@ -126,7 +126,7 @@ All configuration is environment variables, read once at startup.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `WSS_MUX_PUSH_AUTH_TOKEN` | — (required) | shared bearer secret for `POST /v1/events*` |
+| `WSS_MUX_PUSH_AUTH_TOKEN` | — (required) | shared bearer secret for `POST /events*` |
 | `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — | HS256 client-token secret; optional if an Ed25519 key is set |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY` | — | Ed25519 (EdDSA) client-token public key, inline PEM |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |

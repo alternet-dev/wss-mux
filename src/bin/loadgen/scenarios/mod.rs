@@ -66,7 +66,7 @@ pub async fn post_event(
     body: &[u8],
 ) -> Result<reqwest::StatusCode> {
     let response = http
-        .post(format!("{base_url}/v1/events"))
+        .post(format!("{base_url}/events"))
         .header(
             reqwest::header::AUTHORIZATION,
             format!("Bearer {push_token}"),

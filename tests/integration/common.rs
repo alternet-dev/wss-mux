@@ -126,7 +126,7 @@ pub fn sign_token_ed25519(principals: &[&str]) -> String {
 // --- WebSocket client helpers --------------------------------------------
 
 pub async fn connect_ws(addr: SocketAddr) -> Ws {
-    let url = format!("ws://{addr}/v1/stream");
+    let url = format!("ws://{addr}/stream");
     let mut req = url.into_client_request().expect("request");
     req.headers_mut()
         .insert("Sec-WebSocket-Protocol", "wss-mux".parse().expect("header"));
@@ -137,7 +137,7 @@ pub async fn connect_ws(addr: SocketAddr) -> Ws {
 }
 
 pub async fn connect_ws_cbor(addr: SocketAddr) -> Ws {
-    let url = format!("ws://{addr}/v1/stream");
+    let url = format!("ws://{addr}/stream");
     let mut req = url.into_client_request().expect("request");
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",

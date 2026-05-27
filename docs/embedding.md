@@ -16,7 +16,7 @@ was sent, a feed item was created, a user came online — push it to
 `wss-mux`:
 
 ```http
-POST /v1/events
+POST /events
 Authorization: Bearer <push-token>
 Content-Type: application/json
 
@@ -34,7 +34,7 @@ restarting.
 For batch efficiency:
 
 ```http
-POST /v1/events/batch
+POST /events/batch
 Authorization: Bearer <push-token>
 
 { "events": [ {...}, {...}, ... ] }
@@ -140,7 +140,7 @@ Authorization: <your-app-auth>
 → {
     "token": "<jwt>",
     "expires_at": "...",
-    "url": "wss://.../v1/stream"
+    "url": "wss://.../stream"
   }
 ```
 
@@ -269,7 +269,7 @@ streams:
   (a CBOR-relayed event is measured the same as a JSON push).
 - Absent ⇒ no cap. `0` is rejected at manifest load (it would
   black-hole the stream).
-- Enforced on `/v1/events`, `/v1/events/batch`, and the internal
+- Enforced on `/events`, `/events/batch`, and the internal
   relay path alike — defense-in-depth, so a rolling deploy with mixed
   manifests can't let an oversized event through a not-yet-updated
   instance.

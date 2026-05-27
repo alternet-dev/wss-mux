@@ -95,7 +95,7 @@ async fn relay_receive_delivers_to_local_subscribers() {
     }));
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .header("Content-Type", "application/cbor")
         .body(body)
@@ -130,7 +130,7 @@ async fn relay_receive_requires_push_token() {
     let http = reqwest::Client::new();
 
     let missing = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .body(body.clone())
         .send()
         .await
@@ -138,7 +138,7 @@ async fn relay_receive_requires_push_token() {
     assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
 
     let wrong = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", "Bearer not-the-token")
         .body(body)
         .send()
@@ -153,7 +153,7 @@ async fn relay_receive_rejects_invalid_cbor() {
     let addr = spawn_server(state).await;
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .body(vec![0xff, 0x00, 0x13, 0x37])
         .send()
@@ -174,7 +174,7 @@ async fn relay_receive_unknown_stream_is_404_all_or_nothing() {
     }));
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .body(body)
         .send()
@@ -192,7 +192,7 @@ async fn relay_receive_without_manifest_returns_503() {
     }));
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr}/internal/v1/relay"))
+        .post(format!("http://{addr}/internal/relay"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .body(body)
         .send()
@@ -245,7 +245,7 @@ async fn producer_push_relays_to_peer_instance() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr_a}/v1/events"))
+        .post(format!("http://{addr_a}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages", "key": "room-42",
@@ -297,7 +297,7 @@ async fn relay_receipt_is_not_re_relayed_one_hop_guard() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr_a}/v1/events"))
+        .post(format!("http://{addr_a}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages", "key": "room-42",
@@ -340,7 +340,7 @@ async fn relay_failure_is_best_effort_and_metered() {
 
     let http = reqwest::Client::new();
     let resp = http
-        .post(format!("http://{addr_a}/v1/events"))
+        .post(format!("http://{addr_a}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
         .json(&serde_json::json!({
             "stream": "chat_messages", "key": "room-42",
