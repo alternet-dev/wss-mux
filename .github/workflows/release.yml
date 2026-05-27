@@ -254,7 +254,20 @@ jobs:
         # --provenance attaches a signed attestation linking this version
         # to the workflow run that produced it. Required by Trusted
         # Publishing; visible as a "Provenance" badge on npmjs.com.
-        run: npm publish --provenance --access public
+        #
+        # Idempotent: if the package@version is already on the registry
+        # (e.g. on a retag of an already-published version), skip rather
+        # than fail. Matches the github-release job's same posture, so a
+        # retag re-runs binaries + homebrew + GH Release without erroring
+        # on the one job that can't republish.
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "@alternet/wss-mux-client@${VERSION}" version >/dev/null 2>&1; then
+            echo "@alternet/wss-mux-client@${VERSION} already published; skipping."
+            exit 0
+          fi
+          npm publish --provenance --access public
 
   # ---------- Homebrew tap formula update ----------
 
