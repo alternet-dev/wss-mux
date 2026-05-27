@@ -110,9 +110,13 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
+        # Intel-Mac (x86_64-apple-darwin) is intentionally not built:
+        # GitHub's free-tier macos-13 runners are persistently backed up
+        # for tens of minutes to hours per release, and the Intel-Mac
+        # audience for a Rust server binary is effectively nil at this
+        # point. Anyone who needs it can `cargo install --git` from
+        # source; the Homebrew formula is arm64-only on macOS.
         include:
-          - target: x86_64-apple-darwin
-            runner: macos-13
           - target: aarch64-apple-darwin
             runner: macos-14
           - target: x86_64-unknown-linux-gnu

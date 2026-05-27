@@ -21,7 +21,10 @@ fetch_sha() {
   curl --fail --silent --show-error --location "$url" | awk '{print $1}'
 }
 
-SHA_DARWIN_X86=$(fetch_sha x86_64-apple-darwin)
+# Intel-Mac (x86_64-apple-darwin) is intentionally not built — see the
+# matrix comment in .github/workflows/release.yml. Intel Mac users on
+# Homebrew will get a "no available formula" message; they can install
+# via `cargo install --git https://github.com/${REPO}` from source.
 SHA_DARWIN_ARM=$(fetch_sha aarch64-apple-darwin)
 SHA_LINUX_X86=$(fetch_sha x86_64-unknown-linux-gnu)
 SHA_LINUX_ARM=$(fetch_sha aarch64-unknown-linux-gnu)
@@ -34,10 +37,6 @@ class WssMux < Formula
   license "MIT OR Apache-2.0"
 
   on_macos do
-    on_intel do
-      url "${BASE_URL}/wss-mux-${REF_NAME}-x86_64-apple-darwin.tar.gz"
-      sha256 "${SHA_DARWIN_X86}"
-    end
     on_arm do
       url "${BASE_URL}/wss-mux-${REF_NAME}-aarch64-apple-darwin.tar.gz"
       sha256 "${SHA_DARWIN_ARM}"
