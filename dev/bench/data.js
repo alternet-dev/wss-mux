@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779846619112,
+  "lastUpdate": 1779850724048,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -1439,6 +1439,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05acc1904f65d38b74b2b50a27ce7c54a188eca2",
+          "message": "feat(wire)!: drop version from WebSocket subprotocol identifier (#72)\n\nBREAKING CHANGE: the subprotocol Sec-WebSocket-Protocol identifier loses\nits version field. Clients previously offering `wss-mux.v1` or\n`wss-mux.v1.cbor` must now offer `wss-mux` or `wss-mux.cbor` to\nnegotiate successfully; the server returns HTTP 400 for any v0.5.0\nclient that still sends the old identifier.\n\nThis is a pre-1.0 wire break, allowed under the project's pre-1.0\nSemVer policy and documented in `docs/protocol.md`.\n\n## Why\n\nUnder the client/server lockstep model (see #54), the subprotocol's\nversion field was redundant: a client at a given release is paired with\na server at the same release by construction. Negotiation of *which*\nwire version to use is structural, not advertised. The `.v1` field\ncreated three different version concepts in play (server SemVer, SDK\nSemVer, wire-major) and exposed the inconsistency that wire-major didn't\nmove with server SemVer — even at minor/patch wire breaks pre-1.0.\n\nThe same argument that's driving #55 to drop URL versioning applies\nhere: under lockstep, version is implicit, so the identifier just\nidentifies the protocol.\n\n## Changes\n\n- `src/server/ws.rs`: `SUBPROTOCOL` is now `wss-mux`, `SUBPROTOCOL_CBOR`\n  is `wss-mux.cbor`. Negotiation logic, error message, and code comments\n  updated.\n- `src/bin/loadgen/client.rs`: sends `wss-mux` on upgrade.\n- `tests/integration/common.rs`: WebSocket connect helpers updated.\n- `docs/protocol.md`: §\"Subprotocol negotiation\" and §\"Forward\n  compatibility\" updated. The forward-compat section now explains why\n  the identifier doesn't carry a version under lockstep.\n- `README.md`: CBOR note updated.\n\n## Verification\n\n- `cargo build` — green.\n- `cargo test --all-targets` — all 262 tests pass.\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.",
+          "timestamp": "2026-05-26T20:52:03-06:00",
+          "tree_id": "574ad8d04524389ddd38fce4267c12dd8a9f9464",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/05acc1904f65d38b74b2b50a27ce7c54a188eca2"
+        },
+        "date": 1779850723597,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 256,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1649,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3743,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29730,
+            "range": "± 108",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 333,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2391,
+            "range": "± 43",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29371,
+            "range": "± 1627",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 376259,
+            "range": "± 25690",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4981490,
+            "range": "± 378777",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 138,
+            "range": "± 388",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 132,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31579,
+            "range": "± 239",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 156,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 46,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 72,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 75,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 352,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3818,
+            "range": "± 46",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 147,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 37631,
+            "range": "± 553",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 664,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 371408,
+            "range": "± 4279",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7162,
+            "range": "± 39",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 133,
+            "range": "± 2",
             "unit": "ns/iter"
           }
         ]
