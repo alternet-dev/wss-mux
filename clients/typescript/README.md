@@ -1,4 +1,4 @@
-# @wss-mux/client
+# @alternet/wss-mux-client
 
 Browser TypeScript client for the [wss-mux](https://github.com/alternet-dev/wss-mux)
 WebSocket multiplexer.
@@ -13,13 +13,13 @@ WebSocket multiplexer.
 ## Install
 
 ```bash
-npm install @wss-mux/client
+npm install @alternet/wss-mux-client
 ```
 
 ## Quickstart
 
 ```ts
-import { WssMuxClient } from "@wss-mux/client";
+import { WssMuxClient } from "@alternet/wss-mux-client";
 
 const client = new WssMuxClient({
   // Whatever path your wss-mux deployment serves the WebSocket on; the
