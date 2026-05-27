@@ -128,10 +128,8 @@ pub fn sign_token_ed25519(principals: &[&str]) -> String {
 pub async fn connect_ws(addr: SocketAddr) -> Ws {
     let url = format!("ws://{addr}/v1/stream");
     let mut req = url.into_client_request().expect("request");
-    req.headers_mut().insert(
-        "Sec-WebSocket-Protocol",
-        "wss-mux.v1".parse().expect("header"),
-    );
+    req.headers_mut()
+        .insert("Sec-WebSocket-Protocol", "wss-mux".parse().expect("header"));
     let (stream, _) = tokio_tungstenite::connect_async(req)
         .await
         .expect("connect");
@@ -143,7 +141,7 @@ pub async fn connect_ws_cbor(addr: SocketAddr) -> Ws {
     let mut req = url.into_client_request().expect("request");
     req.headers_mut().insert(
         "Sec-WebSocket-Protocol",
-        "wss-mux.v1.cbor".parse().expect("header"),
+        "wss-mux.cbor".parse().expect("header"),
     );
     let (stream, _) = tokio_tungstenite::connect_async(req)
         .await
