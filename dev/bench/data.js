@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779864913706,
+  "lastUpdate": 1779868048264,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -2698,6 +2698,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5fc5d7149e002e5805189f43a527fbb08781bd0b",
+          "message": "ci(release): create github-release job to auto-release on tags (#77)\n\nThree changes to the github-release job, matching what alternet-dev/wavefront\nalready does in its release.yml:\n\n1. **--notes-from-tag instead of --generate-notes.** The release body\n   now comes from the annotation message of the `git tag -a` that\n   triggered the workflow, rather than an auto-summary of commit\n   messages. This makes the release-page content match what we already\n   write into tag annotations (e.g. v0.5.2's annotation describing the\n   wire change + SDK introduction). Encourages writing real release\n   notes at tag time rather than scraping the commit log.\n\n2. **Idempotent.** Re-running the workflow on the same tag (e.g. after\n   a partial failure where binaries built but the release create call\n   errored) no longer fails on \"release already exists\" — it uploads\n   the binaries to the existing release with --clobber. The original\n   create path stays unchanged for first runs.\n\n3. **--verify-tag.** gh release create refuses to create a release for\n   a tag that doesn't actually exist in the repo, which guards against\n   the edge case of the workflow being triggered against a deleted tag.\n\nPlus prerelease detection: any tag containing `-` (e.g. `v1.0.0-rc1`,\n`v0.6.0-beta.2`) gets `--prerelease`. No-op for the current `vX.Y.Z`\nrelease line but unblocks pre-release tagging without a workflow edit.\n\nNo new dependencies; the job still uses `gh release` + `actions/checkout`\n+ `actions/download-artifact`.\n\n(Originally drafted as a release-please integration; the wavefront\npattern — write your own annotated tag, workflow auto-creates the\nrelease page from it — is simpler and is the established pattern in\nthis org.)",
+          "timestamp": "2026-05-27T01:40:48-06:00",
+          "tree_id": "0dada37f5d8aec7be2dacc1895a07e27e10b2ca8",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/5fc5d7149e002e5805189f43a527fbb08781bd0b"
+        },
+        "date": 1779868047952,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 255,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1641,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3698,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29217,
+            "range": "± 159",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 328,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2378,
+            "range": "± 41",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29300,
+            "range": "± 1422",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 370789,
+            "range": "± 27967",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5446038,
+            "range": "± 982151",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 137,
+            "range": "± 386",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31365,
+            "range": "± 98",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 159,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 72,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 329,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3830,
+            "range": "± 94",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21173,
+            "range": "± 139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 666,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 367898,
+            "range": "± 2680",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6959,
+            "range": "± 107",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 135,
             "range": "± 0",
             "unit": "ns/iter"
           }
