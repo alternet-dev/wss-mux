@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779901920243,
+  "lastUpdate": 1779906209593,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -4139,6 +4139,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 110,
             "range": "± 3",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3dee99e4b030b220d901f4efa051ff35ee63a333",
+          "message": "ci(release): make npm-publish idempotent on retags (#85)\n\nIf a release run re-fires for a tag whose version is already published\nto npm, the job currently 403s. That's the only non-idempotent piece of\nthe release pipeline — github-release became idempotent in #77 and the\nHomebrew tap update is a no-op when the formula content matches what's\nalready on the tap.\n\nAdd a pre-publish check: query the registry for the current version, and\nskip the publish if it's already there. Behaviour:\n\n- First run for a version: skip falls through, publish proceeds as before.\n- Retag for an already-published version: skip prints a message and the\n  job exits 0. Downstream jobs (none currently) would still run.\n\nWhy this matters: when a release run partially succeeds (e.g. the Mac\nbinary build queues forever and the run gets cancelled before the GH\nRelease page + Homebrew tap get created), retagging is the natural way\nto re-fire the workflow. Before this change, the npm-publish job would\nfail on retag because the npm version had already been published in the\nprior partial run. Now the retag completes cleanly across the board.\n\nVerified by inspection: `npm view <pkg>@<version> version` returns the\nversion string on success (exit 0) and a 404 on missing (exit 1).\n`>/dev/null 2>&1` swallows both the success stdout and the 404 stderr,\nso the `if` branches on exit code alone.",
+          "timestamp": "2026-05-27T12:16:35-06:00",
+          "tree_id": "8c573609f9bfb0620fe9c9deb55a26c7386e367d",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/3dee99e4b030b220d901f4efa051ff35ee63a333"
+        },
+        "date": 1779906209210,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 325,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1900,
+            "range": "± 34",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 4101,
+            "range": "± 152",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33661,
+            "range": "± 1006",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 329,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2371,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28615,
+            "range": "± 1939",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 424357,
+            "range": "± 30273",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4634998,
+            "range": "± 428512",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 160,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 141,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33758,
+            "range": "± 139",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 171,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 78,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 80,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 353,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2842,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38683,
+            "range": "± 3156",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 739,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 376360,
+            "range": "± 3025",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6715,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
