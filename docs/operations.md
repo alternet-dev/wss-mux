@@ -108,8 +108,8 @@ spec:
             - { name: WSS_MUX_STREAMS_MANIFEST_PATH, value: /etc/wss-mux/streams.yaml }
           volumeMounts:
             - { name: manifest, mountPath: /etc/wss-mux, readOnly: true }
-          readinessProbe: { httpGet: { path: /readyz, port: 8080 } }
-          livenessProbe:  { httpGet: { path: /healthz, port: 8080 } }
+          readinessProbe: { httpGet: { path: /ready, port: 8080 } }
+          livenessProbe:  { httpGet: { path: /health, port: 8080 } }
       volumes:
         - name: manifest
           configMap: { name: wss-mux-streams }
@@ -289,7 +289,7 @@ skew); `timeout` means peers are overloaded or
 | `…{reason="timeout"}` sustained | Peers overloaded; or timeout too tight | Scale out; raise `WSS_MUX_PEER_RELAY_TIMEOUT_MS` |
 | All relays fail right after enabling TLS | Bad CA / client cert path or PEM | Check `WSS_MUX_PEER_CA_FILE` / `_CLIENT_CERT` / `_KEY`; startup also logs this |
 | Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; bounded by the refresh interval |
-| Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/readyz`), or the client side |
+| Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/ready`), or the client side |
 | `413` from `POST /events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
 | Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/relay`; it is internal-only |
 | Reconnect storm on every deploy | Expected with ephemeral connections on rolling restart | Ensure clients reconnect with jittered backoff and auto-resubscribe |

@@ -168,7 +168,7 @@ Operational notes:
 - **Binary framing.** Clients may negotiate the `wss-mux.cbor`
   subprotocol for CBOR instead of JSON; frame shapes are identical.
 - **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
-  `/healthz` and `/readyz` are the liveness/readiness probes.
+  `/health` and `/ready` are the liveness/readiness probes.
 - **Token validation.** Signed-handshake tokens (HS256 and/or
   Ed25519/EdDSA — the token's `alg` picks the key) *or*, mutually
   exclusively, OIDC: the `auth` token is validated against an OIDC

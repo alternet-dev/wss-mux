@@ -287,8 +287,8 @@ impl AppState {
 
 pub fn build_app(state: AppState) -> Router {
     Router::new()
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/metrics", get(http::metrics))
         .route("/events", post(http::push_event))
         .route("/events/batch", post(http::push_batch))
@@ -297,11 +297,11 @@ pub fn build_app(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn healthz() -> &'static str {
+async fn health() -> &'static str {
     "ok"
 }
 
-async fn readyz(State(state): State<AppState>) -> (StatusCode, &'static str) {
+async fn ready(State(state): State<AppState>) -> (StatusCode, &'static str) {
     if state.manifest().is_none() {
         return (StatusCode::SERVICE_UNAVAILABLE, "not ready");
     }

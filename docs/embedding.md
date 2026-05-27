@@ -187,7 +187,7 @@ WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
   `WSS_MUX_OIDC_JWKS_REFRESH` seconds; a failed refresh is logged +
   metered (`wss_mux_oidc_jwks_refresh`) and keeps the last-good cache,
   so an IdP blip does not 401 every client. Until the *first*
-  successful fetch, `/readyz` returns 503 (`wss_mux_oidc_jwks_keys`
+  successful fetch, `/ready` returns 503 (`wss_mux_oidc_jwks_keys`
   gauge stays 0) so the pod is kept out of rotation rather than
   rejecting everyone.
 

@@ -64,7 +64,7 @@ fn spawn_peer_refresher(state: AppState) {
 /// then refresh every `WSS_MUX_OIDC_JWKS_REFRESH`. A failed fetch is
 /// logged + metered and keeps the last-good cache — a transient IdP
 /// blip must never 401 every client (same posture as the manifest
-/// reloader and peer refresher; `readyz` still gates a never-fetched
+/// reloader and peer refresher; `ready` still gates a never-fetched
 /// JWKS out of rotation).
 fn spawn_oidc_jwks_refresher(state: AppState) {
     let Some(oidc) = state.config().oidc.clone() else {

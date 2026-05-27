@@ -6,8 +6,8 @@ A single binary built around a few small components.
          +-----------------+
          |   HTTP server   |  POST /events
          |                 |  POST /events/batch
-         +--------+--------+  GET  /healthz
-                  |           GET  /readyz
+         +--------+--------+  GET  /health
+                  |           GET  /ready
                   v
          +-----------------+
          |   Dispatcher    |  events -> matching subscriptions
@@ -34,7 +34,7 @@ Accepts producer pushes on `POST /events` and the batched
 secret. Validates the event envelope, forwards to the dispatcher.
 Stateless.
 
-Also serves `/healthz` (200 if the process is alive) and `/readyz`
+Also serves `/health` (200 if the process is alive) and `/ready`
 (200 once the manifest is loaded and the WS listener is up).
 
 ### Dispatcher
