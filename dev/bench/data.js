@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779850830075,
+  "lastUpdate": 1779859390850,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -1799,6 +1799,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
             "range": "± 2",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cda7967a076d6f845bd6f60fce37bab5a4f733ff",
+          "message": "chore(client): rename to @alternet/wss-mux-client (#73)\n\nPublishes the SDK under the org-wide @alternet npm scope rather than\na project-specific @wss-mux scope. Mirrors the existing pattern of the\nshared Homebrew tap at alternet-dev/homebrew-tap — one org-level scope\nacross all alternet projects.\n\nThe @wss-mux scope is held in reserve; if wss-mux ever grows multiple\nnpm artifacts (e.g. a Node helper, a CLI, schema types), we can promote\nthis package to @wss-mux/client at that point. Migration would be a\ndeprecation notice on @alternet/wss-mux-client + a shim final-version\nthat re-exports from the new name. npm has no first-class redirects,\nso this is the standard pre-1.0 dance.\n\nChanges:\n- package.json `name` field.\n- package-lock.json regenerated via `npm install` (matching project\n  metadata only; no dependency change).\n- README install snippet and import in the quickstart.\n- examples/basic.ts import and header comment.\n\nVerification:\n- npm run typecheck — green.\n- npm run build — green.\n- npm test — 12 unit + reconnect tests pass; 1 e2e skipped.",
+          "timestamp": "2026-05-26T23:16:35-06:00",
+          "tree_id": "96fa5deb82d205700b7c5fbc0a1a9077bcdf6305",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/cda7967a076d6f845bd6f60fce37bab5a4f733ff"
+        },
+        "date": 1779859389928,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 297,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1900,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 4117,
+            "range": "± 77",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33260,
+            "range": "± 108",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 332,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2405,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28457,
+            "range": "± 1189",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 367971,
+            "range": "± 27850",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5311370,
+            "range": "± 350812",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 158,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 138,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33310,
+            "range": "± 371",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 165,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 77,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 80,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 363,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4133,
+            "range": "± 51",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38802,
+            "range": "± 136",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 374243,
+            "range": "± 9206",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6552,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 137,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
