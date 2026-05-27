@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779870805033,
+  "lastUpdate": 1779898473638,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -3778,6 +3778,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 135,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fb8de3b3b09c62815b3f25049c402fdd2e06a834",
+          "message": "fix(ci): pin npm to >=11.5.1 for Trusted Publishing support (#82)\n\nThe npm-publish job has been failing on v0.5.3 with HTTP 404 on the\nregistry PUT, despite OIDC token signing working (provenance landed in\nSigstore each attempt). Root cause: npm Trusted Publishing (token-free\nPUT via OIDC) requires npm >= 11.5.1, but `setup-node@v4 node-version:\n\"22\"` ships whichever npm Node 22.x bundles — often npm 10.x, which has\n`--provenance` (added in 9.5) but lacks the registry PUT auth flow that\ntrusts an OIDC token in place of NODE_AUTH_TOKEN. The publish signs\nprovenance, then PUTs without auth, the registry 404s with the\nmisleading \"not in this registry\" message.\n\nTwo changes to the npm-publish job:\n\n- Bump node-version 22 → 24. Node 24 ships current npm by default\n  (11.x in early 2025+). The earlier comment about Node 22 having\n  npm 11 was wrong on the specific patch versions that resolve.\n\n- Explicitly `npm install -g 'npm@>=11.5.1'` before publish, with\n  `node --version` + `npm --version` logged. Belt-and-suspenders so\n  the publish never silently uses a stale npm; diagnostic versions\n  in the log if anything else regresses.\n\nVerified against the v0.5.3 release log: provenance is generated and\npushed to Sigstore (https://search.sigstore.dev/?logIndex=1640898082),\nthen PUT fails — the exact signature of \"npm CLI version too old for\nTrusted Publishing.\" Configuration on the @alternet/wss-mux-client\ntrusted publisher page is correct (GitHub Actions / alternet-dev /\nwss-mux / release.yml / no environment / allow `npm publish`).",
+          "timestamp": "2026-05-27T10:07:41-06:00",
+          "tree_id": "835cfb11c2b858bd8485e75cb6b7fb822dbd3734",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/fb8de3b3b09c62815b3f25049c402fdd2e06a834"
+        },
+        "date": 1779898472722,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 250,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1458,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3218,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 26314,
+            "range": "± 641",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 350,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 3116,
+            "range": "± 106",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 35927,
+            "range": "± 1895",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 515588,
+            "range": "± 21896",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 7556604,
+            "range": "± 738200",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 149,
+            "range": "± 104",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 121,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 35827,
+            "range": "± 178",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 141,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 14,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 41,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 63,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 66,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 411,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 82,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4145,
+            "range": "± 152",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 121,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 40566,
+            "range": "± 52",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 685,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 418257,
+            "range": "± 1605",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 5943,
+            "range": "± 247",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 123,
             "range": "± 0",
             "unit": "ns/iter"
           }
