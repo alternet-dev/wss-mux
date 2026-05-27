@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779863341232,
+  "lastUpdate": 1779863693000,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -2339,6 +2339,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 137,
             "range": "± 3",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1902a02945cf491e3b32a9a922448c43475be70",
+          "message": "chore: bump version to 0.5.2 (#75)\n\nv0.5.1 release run hit two issues: the npm-publish job needed a token\nwith 2FA-bypass (now in place), and the Docker amd64 build failed at\ncargo manifest parse because the Dockerfile didn't COPY benches/ (fixed\nin #74). Both fixes are on trunk; this bump cuts v0.5.2 as the clean\nrelease that picks them up.\n\nSame lockstep bump on the TypeScript SDK: @alternet/wss-mux-client@0.5.2.",
+          "timestamp": "2026-05-27T00:28:01-06:00",
+          "tree_id": "2cbf3ab80325705b0bdca041943040aae6fc3e83",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/f1902a02945cf491e3b32a9a922448c43475be70"
+        },
+        "date": 1779863692102,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 253,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1612,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3669,
+            "range": "± 71",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 28763,
+            "range": "± 810",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 329,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2377,
+            "range": "± 34",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29304,
+            "range": "± 1743",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 385167,
+            "range": "± 28812",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5350802,
+            "range": "± 383180",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 144,
+            "range": "± 402",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 134,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31660,
+            "range": "± 112",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 160,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 397,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 102,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3948,
+            "range": "± 82",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 41841,
+            "range": "± 176",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 664,
+            "range": "± 33",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 364578,
+            "range": "± 3311",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7074,
+            "range": "± 106",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 134,
+            "range": "± 2",
             "unit": "ns/iter"
           }
         ]
