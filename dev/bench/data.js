@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779859390850,
+  "lastUpdate": 1779862096094,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -1979,6 +1979,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 137,
             "range": "± 1",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e9f0f018b294c9d91b2ae0206b5a87a8fbc5d974",
+          "message": "ci(release): multi-registry fanout on tag (npm + Homebrew + binaries) (#69)\n\n* ci(release): multi-registry fanout on tag (npm + Homebrew + binaries)\n\nExtends .github/workflows/release.yml so a v*.*.* tag triggers, in\naddition to the existing Docker manifest publish:\n\n- `build-binaries` — cross-compile wss-mux for x86_64 + aarch64 on both\n  macOS and Linux. Native runners for each arch (no QEMU). Each target\n  produces a versioned tarball + .sha256.\n- `github-release` — gh release create with all four tarballs and\n  auto-generated notes.\n- `npm-publish` — typecheck + build + test @wss-mux/client and publish\n  to npmjs.com using the NPM_TOKEN secret.\n- `homebrew-tap` — render a multi-platform formula via\n  scripts/release/render-homebrew-formula.sh and commit it to the\n  alternet-dev/homebrew-tap repo via the HOMEBREW_TAP_TOKEN secret.\n\nThe render script pulls .sha256 files from the just-uploaded GitHub\nRelease so the formula's checksums are computed from the actual\nartifacts the user will download.\n\nRequired secrets (not provisioned by this PR):\n- NPM_TOKEN — npm publish credential with @wss-mux scope access\n- HOMEBREW_TAP_TOKEN — PAT with write access to\n  alternet-dev/homebrew-tap\n\nTogether with #68 this completes the v0.5.1 patch's release plumbing.\nTagging v0.5.1 after both merge publishes wss-mux 0.5.1 to the GitHub\ncontainer registry, GitHub Releases, npmjs.com, and Homebrew tap in\nlockstep.\n\n* chore(ci): correct comment to @alternet/wss-mux-client\n\nThe package name in the npm-publish job's section comment lagged the\nrename in #73. The publish itself reads from clients/typescript/package.json\nso behaviour is unaffected; this just keeps the workflow comment honest.",
+          "timestamp": "2026-05-27T00:01:33-06:00",
+          "tree_id": "93f32ec38be0dcc971466aa86d7a7d6a3514b29c",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/e9f0f018b294c9d91b2ae0206b5a87a8fbc5d974"
+        },
+        "date": 1779862095761,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 307,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1890,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 4132,
+            "range": "± 63",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33311,
+            "range": "± 110",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 338,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2408,
+            "range": "± 62",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28676,
+            "range": "± 1911",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 399406,
+            "range": "± 29052",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5178019,
+            "range": "± 373860",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 157,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 144,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33569,
+            "range": "± 592",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 167,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 77,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 81,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 381,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 102,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2875,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21976,
+            "range": "± 667",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 737,
+            "range": "± 16",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 385843,
+            "range": "± 3125",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6842,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 137,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
