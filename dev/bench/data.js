@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779898473638,
+  "lastUpdate": 1779901920243,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -3959,6 +3959,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 123,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "df3b2ec03f2144905ef76424153bc049368af41d",
+          "message": "build: drop Intel-Mac (x86_64-apple-darwin) target (#84)\n\nGitHub's free-tier macos-13 runners are persistently backed up — the\nv0.5.3 release run sat with the Intel-Mac binary build queued for\nhours, blocking the downstream github-release and homebrew-tap jobs\nsince both `needs: build-binaries`.\n\nCross-compiling x86_64-apple-darwin from macos-14 (arm64) is an\noption, but the Intel-Mac audience for a Rust server binary is\neffectively nil at this point: ARM Macs have been the default for\n4+ years and server-side deployments use Linux containers via the\nDocker image regardless. Carrying the target costs CI minutes,\nadds a moving piece to maintain, and serves nobody we can name.\n\nChanges:\n\n- `.github/workflows/release.yml` — drop the x86_64-apple-darwin\n  matrix entry from build-binaries. Three targets remain:\n  aarch64-apple-darwin, x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu.\n\n- `scripts/release/render-homebrew-formula.sh` — drop the `on_intel do`\n  block inside `on_macos do`. Homebrew on Intel Macs will report\n  \"no available formula\"; Intel-Mac users who need wss-mux can\n  `cargo install --git https://github.com/alternet-dev/wss-mux`\n  from source.\n\nIf demand materializes later, the right re-introduction is cross-compile\nfrom macos-latest using `rustup target add x86_64-apple-darwin` — no\nnew runner type needed.",
+          "timestamp": "2026-05-27T11:05:42-06:00",
+          "tree_id": "89ba6efcf19be664ee01fccc85f3dae23d5c2ece",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/df3b2ec03f2144905ef76424153bc049368af41d"
+        },
+        "date": 1779901919164,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 227,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1558,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3087,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 25912,
+            "range": "± 187",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 255,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 1837,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 22358,
+            "range": "± 1559",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 359150,
+            "range": "± 24910",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 7524271,
+            "range": "± 620615",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 133,
+            "range": "± 335",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 109,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 25903,
+            "range": "± 425",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 126,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 13,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 40,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 60,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 61,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 259,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 1758,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 110,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 30269,
+            "range": "± 401",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 568,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 299659,
+            "range": "± 2126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 4897,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 110,
+            "range": "± 3",
             "unit": "ns/iter"
           }
         ]
