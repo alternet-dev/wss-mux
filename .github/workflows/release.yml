@@ -226,10 +226,20 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # npm Trusted Publishing requires npm >= 11.5; Node 22 ships
-          # an npm 11.x by default, Node 20's bundled 10.x is too old.
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+
+      # npm Trusted Publishing (token-free PUT via OIDC) was added in
+      # npm 11.5.1. setup-node ships whatever npm bundles with the picked
+      # Node version, which can be older than 11.5 even on Node 22/24.
+      # Pin npm explicitly to guarantee Trusted Publishing support; log
+      # versions so failures are diagnosable.
+      - name: Pin npm to 11.5+
+        run: |
+          set -euo pipefail
+          npm install -g 'npm@>=11.5.1'
+          node --version
+          npm --version
 
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
