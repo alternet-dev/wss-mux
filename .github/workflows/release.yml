@@ -190,6 +190,13 @@ jobs:
   npm-publish:
     name: npm-publish
     runs-on: ubuntu-latest
+    # OIDC for npm Trusted Publishing — the runner mints a short-lived
+    # token that npm exchanges for publish capability via the trusted
+    # publisher configured on the @alternet/wss-mux-client package.
+    # No static NPM_TOKEN involved.
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         working-directory: clients/typescript
@@ -198,7 +205,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # npm Trusted Publishing requires npm >= 11.5; Node 22 ships
+          # an npm 11.x by default, Node 20's bundled 10.x is too old.
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - run: npm install --no-audit --no-fund
@@ -206,10 +215,11 @@ jobs:
       - run: npm run build
       - run: npm test
 
-      - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+      - name: Publish to npm (with provenance via OIDC)
+        # --provenance attaches a signed attestation linking this version
+        # to the workflow run that produced it. Required by Trusted
+        # Publishing; visible as a "Provenance" badge on npmjs.com.
+        run: npm publish --provenance --access public
 
   # ---------- Homebrew tap formula update ----------
 
