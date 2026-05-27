@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779862096094,
+  "lastUpdate": 1779863341232,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -2159,6 +2159,186 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 137,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2f2ba9cb3b6f1ad4564a4f3dd2d8fd3cbff26c3e",
+          "message": "fix(docker): COPY benches/ so cargo manifest parses (#74)\n\nThe release.yml Docker build was failing at the `cargo build --release\n--bin wss-mux` step with:\n\n    error: failed to parse manifest at `/build/Cargo.toml`\n    Caused by:\n      can't find `cbor` bench at `benches/cbor.rs` or `benches/cbor/main.rs`\n\nCargo validates every [[bench]] / [[test]] / [[bin]] target's source\npath at manifest parse time, even when the build is restricted to a\nsingle --bin target. The Dockerfile copies Cargo.toml/Cargo.lock/src/\n/tests/ but the criterion benches added in #43 live under benches/,\nwhich the Dockerfile never copied.\n\nv0.5.0 predates the benches, so this is the first tag where the gap\nmatters; v0.5.1's Docker build is the first to hit it.\n\nFix: add `COPY benches ./benches` to the Dockerfile. Cargo finds the\nsource files, manifest parses, and `--bin wss-mux` builds just the\nserver as before (no bench compilation in the image build).\n\nVerified locally with `docker build .` — succeeds.",
+          "timestamp": "2026-05-27T00:22:06-06:00",
+          "tree_id": "c23d5062531d93eb58c1cdea51b3be2b2e5224e6",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/2f2ba9cb3b6f1ad4564a4f3dd2d8fd3cbff26c3e"
+        },
+        "date": 1779863339993,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 322,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1908,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 4236,
+            "range": "± 34",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33287,
+            "range": "± 215",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 332,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2398,
+            "range": "± 65",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28635,
+            "range": "± 1550",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 405091,
+            "range": "± 29120",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 6670789,
+            "range": "± 663554",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 159,
+            "range": "± 466",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 138,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33573,
+            "range": "± 523",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 165,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 77,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 81,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 316,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4151,
+            "range": "± 36",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38346,
+            "range": "± 1471",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 740,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 373445,
+            "range": "± 1346",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6534,
+            "range": "± 147",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 137,
+            "range": "± 3",
             "unit": "ns/iter"
           }
         ]
