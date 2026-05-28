@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780010449931,
+  "lastUpdate": 1780010993538,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -4498,6 +4498,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f701778d604254bffa3fdbac7f5336b25a254025",
+          "message": "feat(server): handle Publish frame (audience + dispatch) (#88)\n\nReplace the stub `unknown_frame_type` arm with the real WS-publish\nhandler. The publish path shares the dispatch path with HTTP push:\nonce the frame passes the wire/audience/cap checks, it goes through\n`dispatch` (registry match → per-sub channel) and `spawn_relay`\n(fire-and-forget peer fanout), identical to `accept_events` in\n`src/server/http.rs`.\n\nThe only WS-specific surface on top of the shared dispatch is the\n`publish`-audience check against the connection's principals.\n\n## Handler logic\n\nFor a `ClientFrame::Publish { id, stream, key, payload }`:\n\n1. If not authenticated, emit `unauthenticated` (echo id) and close\n   4401 — same posture as a pre-auth `subscribe`.\n2. Look up the stream in the manifest. Absent ⇒ `unknown_stream`\n   (keep-open, echo id).\n3. Check the connection's principals against the stream's `publish`\n   audience. No match ⇒ `unauthorized_publish` (keep-open, echo id).\n4. If the stream sets `max_payload_bytes`, measure the payload's JSON\n   serialization (stable across producer/relay wire codecs, identical\n   to HTTP push's cap enforcement). Over ⇒ `publish_payload_too_large`\n   (keep-open, echo id).\n5. Build an `EventEnvelope` and call `dispatch(..., Producer)` for\n   local registry fanout + `spawn_relay(...)` for one-hop peer fanout.\n\n## Parser whitelist\n\nBoth `parse_client_frame_json` and `parse_client_frame_cbor` had an\nexplicit type-string whitelist (`auth | subscribe | unsubscribe`)\nthat fell through to `unknown_frame_type` for anything else. Added\n`publish` so well-formed publish frames reach the dispatch arm.\n\n## New ProtocolError variants\n\nTwo new keep-open variants matching the wire docs from PR-1:\n\n- `UnauthorizedPublish { id }`\n- `PublishPayloadTooLarge { id }`\n\nBoth echo the publish frame's `id`. `code()`, `message()`, and `id()`\nimplementations follow the existing pattern.\n\n`UnauthorizedSubscribe`'s message string is rewritten (\"...stream\nsubscribe audience\") to align with the field rename in PR-1; the wire\ncode string is unchanged.\n\n## Tests\n\nNew `tests/integration/publish.rs` covering:\n\n- Happy path: publish → own subscriber receives the event.\n- Default-deny (`publish` absent in manifest) ⇒ `unauthorized_publish`.\n- Principal mismatch (`publish: [role:operator]` vs `role:member`).\n- Unknown stream.\n- Payload over `max_payload_bytes` cap.\n- Payload under cap ⇒ dispatched.\n- Pre-auth publish closes 4401.\n\n`mod publish` added to `tests/integration/main.rs`.\n\n## Verification\n\n- `cargo test --all-targets` — 278 tests pass (was 271 on trunk; +7 new).\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.",
+          "timestamp": "2026-05-28T17:23:01-06:00",
+          "tree_id": "82be15633539a01052d0418104945590ceb589d1",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/f701778d604254bffa3fdbac7f5336b25a254025"
+        },
+        "date": 1780010992705,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 248,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1615,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3677,
+            "range": "± 57",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29635,
+            "range": "± 96",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 359,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2414,
+            "range": "± 50",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29062,
+            "range": "± 1601",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 334810,
+            "range": "± 24320",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4663708,
+            "range": "± 375005",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 136,
+            "range": "± 588",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 134,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 32912,
+            "range": "± 1055",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 157,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 77,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 392,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3936,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 147,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 42298,
+            "range": "± 219",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 663,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 366344,
+            "range": "± 3896",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7025,
+            "range": "± 92",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 132,
             "range": "± 0",
             "unit": "ns/iter"
           }
