@@ -10,6 +10,7 @@ mod hot_reload;
 mod max_payload;
 mod metrics;
 mod overflow;
+mod publish;
 mod push_to_fanout;
 mod rate_limit;
 mod ready;

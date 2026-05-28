@@ -14,7 +14,9 @@ pub enum ProtocolError {
     ExpiredToken,
     UnknownStream { id: String },
     UnauthorizedSubscribe { id: String },
+    UnauthorizedPublish { id: String },
     DuplicateSubscriptionId { id: String },
+    PublishPayloadTooLarge { id: String },
     RateLimited { id: Option<String> },
     Overflow { id: String },
 }
@@ -28,7 +30,9 @@ impl ProtocolError {
             Self::ExpiredToken => "expired_token",
             Self::UnknownStream { .. } => "unknown_stream",
             Self::UnauthorizedSubscribe { .. } => "unauthorized_subscribe",
+            Self::UnauthorizedPublish { .. } => "unauthorized_publish",
             Self::DuplicateSubscriptionId { .. } => "duplicate_subscription_id",
+            Self::PublishPayloadTooLarge { .. } => "publish_payload_too_large",
             Self::RateLimited { .. } => "rate_limited",
             Self::Overflow { .. } => "overflow",
         }
@@ -41,8 +45,16 @@ impl ProtocolError {
             Self::Unauthenticated { .. } => "non-auth frame before auth",
             Self::ExpiredToken => "auth token has expired",
             Self::UnknownStream { .. } => "stream not declared in manifest",
-            Self::UnauthorizedSubscribe { .. } => "principals do not intersect stream audience",
+            Self::UnauthorizedSubscribe { .. } => {
+                "principals do not intersect stream subscribe audience"
+            }
+            Self::UnauthorizedPublish { .. } => {
+                "principals do not intersect stream publish audience"
+            }
             Self::DuplicateSubscriptionId { .. } => "subscription id already in use",
+            Self::PublishPayloadTooLarge { .. } => {
+                "publish payload exceeds the stream's max_payload_bytes cap"
+            }
             Self::RateLimited { .. } => "inbound frame rate limit exceeded",
             Self::Overflow { .. } => "per-subscription send queue overflowed",
         }
@@ -56,7 +68,9 @@ impl ProtocolError {
             Self::Unauthenticated { id } | Self::RateLimited { id } => id.as_deref(),
             Self::UnknownStream { id }
             | Self::UnauthorizedSubscribe { id }
+            | Self::UnauthorizedPublish { id }
             | Self::DuplicateSubscriptionId { id }
+            | Self::PublishPayloadTooLarge { id }
             | Self::Overflow { id } => Some(id),
             _ => None,
         }
