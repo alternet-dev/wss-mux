@@ -15,11 +15,13 @@ use tokio_stream::StreamMap;
 
 use crate::auth::{audience_admits, AuthError};
 use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx, OutboundTx};
-use crate::envelope::{ClientFrame, ServerFrame};
+use crate::dispatcher::{dispatch, EventOrigin};
+use crate::envelope::{ClientFrame, EventEnvelope, ServerFrame};
 use crate::error::ProtocolError;
 use crate::manifest::Manifest;
 use crate::ratelimit::TokenBucket;
 use crate::server::metrics::{RevokeReason, RevokeReasonLabel};
+use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
 
 pub const SUBPROTOCOL: &str = "wss-mux";
@@ -202,7 +204,7 @@ fn parse_client_frame_json(text: &str) -> Result<ClientFrame, ProtocolError> {
         .and_then(Value::as_str)
         .ok_or(ProtocolError::BadFrame)?;
     match type_str {
-        "auth" | "subscribe" | "unsubscribe" => {
+        "auth" | "subscribe" | "unsubscribe" | "publish" => {
             serde_json::from_value(value).map_err(|_| ProtocolError::BadFrame)
         }
         _ => Err(ProtocolError::UnknownFrameType),
@@ -224,7 +226,7 @@ fn parse_client_frame_cbor(bytes: &[u8]) -> Result<ClientFrame, ProtocolError> {
         })
         .ok_or(ProtocolError::BadFrame)?;
     match type_str {
-        "auth" | "subscribe" | "unsubscribe" => {
+        "auth" | "subscribe" | "unsubscribe" | "publish" => {
             value.deserialized().map_err(|_| ProtocolError::BadFrame)
         }
         _ => Err(ProtocolError::UnknownFrameType),
@@ -470,13 +472,61 @@ async fn reader_loop(
                     state.metrics().subscriptions_active.dec();
                 }
             }
-            // `publish` is recognized at the wire-schema level but not
-            // yet handled — treat the frame as unknown (close 4400)
-            // until the dispatch path is wired in.
-            ClientFrame::Publish { .. } => {
-                let _ = control_tx.try_send(ProtocolError::UnknownFrameType.to_outbound());
-                explicit_close = true;
-                break;
+            // WS publish shares the dispatch path with HTTP `POST /events`:
+            // stream lookup + payload-cap check, then `dispatch` to the
+            // registry and `spawn_relay` for peer fanout. The wire surface
+            // it adds on top of that is the `publish`-audience check
+            // against the connection's principals.
+            ClientFrame::Publish {
+                id,
+                stream,
+                key,
+                payload,
+            } => {
+                let Some(p) = principals.as_ref() else {
+                    let _ = control_tx.try_send(
+                        ProtocolError::Unauthenticated {
+                            id: Some(id.clone()),
+                        }
+                        .to_outbound(),
+                    );
+                    explicit_close = true;
+                    break;
+                };
+                let Some(stream_cfg) = state.manifest().and_then(|m| m.stream(&stream).cloned())
+                else {
+                    let _ = control_tx.try_send(ProtocolError::UnknownStream { id }.to_outbound());
+                    continue;
+                };
+                if !audience_admits(p, &stream_cfg.publish) {
+                    let _ = control_tx
+                        .try_send(ProtocolError::UnauthorizedPublish { id }.to_outbound());
+                    continue;
+                }
+                if let Some(cap) = stream_cfg.max_payload_bytes {
+                    // Stable across producer/relay wire codecs: measure the
+                    // payload's JSON serialization, same as HTTP push.
+                    let size = serde_json::to_vec(&payload)
+                        .map(|b| b.len() as u64)
+                        .unwrap_or(0);
+                    if size > cap {
+                        let _ = control_tx
+                            .try_send(ProtocolError::PublishPayloadTooLarge { id }.to_outbound());
+                        continue;
+                    }
+                }
+                let envelope = EventEnvelope {
+                    stream,
+                    key,
+                    payload,
+                };
+                dispatch(state, envelope.clone(), EventOrigin::Producer);
+                spawn_relay(
+                    state,
+                    RelayBatch {
+                        events: vec![envelope],
+                    },
+                );
             }
         }
     }
