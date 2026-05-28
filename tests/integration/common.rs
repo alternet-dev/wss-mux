@@ -66,7 +66,7 @@ pub fn sample_manifest() -> Manifest {
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
 "#;
     Manifest::from_str(yaml, Path::new("test.yaml")).expect("valid sample manifest")
 }

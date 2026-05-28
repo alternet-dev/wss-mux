@@ -15,7 +15,7 @@ const CAPPED_MANIFEST: &str = r#"
 version: 1
 streams:
   - stream: capped
-    audience: ["*"]
+    subscribe: ["*"]
     max_payload_bytes: 64
 "#;
 

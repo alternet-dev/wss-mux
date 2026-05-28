@@ -156,7 +156,7 @@ fn manifest_with_depth(depth: &str) -> Manifest {
     Manifest::from_str(
         &format!(
             "version: 1\nstreams:\n  - stream: chat_messages\n    \
-             audience: [role:member]\n    queue_depth: {depth}\n"
+             subscribe: [role:member]\n    queue_depth: {depth}\n"
         ),
         std::path::Path::new("t.yaml"),
     )

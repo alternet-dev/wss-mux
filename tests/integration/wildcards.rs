@@ -14,9 +14,9 @@ const WILDCARD_MANIFEST: &str = r#"
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:*]
+    subscribe: [role:*]
   - stream: public_feed
-    audience: ["*"]
+    subscribe: ["*"]
 "#;
 
 fn state_with_wildcards() -> AppState {

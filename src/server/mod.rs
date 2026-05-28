@@ -383,13 +383,13 @@ mod tests {
         assert!(state.manifest().is_none());
 
         state.set_manifest(manifest(
-            "version: 1\nstreams:\n  - stream: a\n    audience: [role:x]\n",
+            "version: 1\nstreams:\n  - stream: a\n    subscribe: [role:x]\n",
         ));
         assert!(state.manifest().expect("set").stream("a").is_some());
 
         // A second set swaps — the old OnceLock would have errored here.
         state.set_manifest(manifest(
-            "version: 1\nstreams:\n  - stream: b\n    audience: [role:y]\n",
+            "version: 1\nstreams:\n  - stream: b\n    subscribe: [role:y]\n",
         ));
         let m = state.manifest().expect("swapped");
         assert!(m.stream("a").is_none());
@@ -406,7 +406,7 @@ mod tests {
         ));
         std::fs::write(
             &path,
-            "version: 1\nstreams:\n  - stream: live\n    audience: [role:x]\n",
+            "version: 1\nstreams:\n  - stream: live\n    subscribe: [role:x]\n",
         )
         .expect("write fixture");
 
