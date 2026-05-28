@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientFrame {
     Auth {
@@ -15,6 +15,23 @@ pub enum ClientFrame {
     },
     Unsubscribe {
         id: String,
+    },
+    /// WS-side publish: a connected client emits an event without
+    /// dropping back to HTTP `POST /events`. The publish path shares
+    /// the same downstream fanout as HTTP push (registry match, peer
+    /// relay); the only added surface is the WS frame parse plus the
+    /// `producers`-audience check on the connection's principals.
+    ///
+    /// `id` is a client-chosen, opaque correlation identifier echoed on
+    /// any error frame so the client can match failures back to its
+    /// originating call. There is no success ack — same ack-by-absence
+    /// pattern as subscribe.
+    Publish {
+        id: String,
+        stream: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+        payload: Value,
     },
 }
 
@@ -170,6 +187,70 @@ mod tests {
         let s = serde_json::to_string(&frame).unwrap();
         let back: ClientFrame = serde_json::from_str(&s).unwrap();
         assert_eq!(back, frame);
+    }
+
+    #[test]
+    fn publish_with_key_roundtrips() {
+        let frame = ClientFrame::Publish {
+            id: "p1".into(),
+            stream: "chat_messages".into(),
+            key: Some("room-42".into()),
+            payload: json!({"from": "alice", "text": "hi"}),
+        };
+        let s = serde_json::to_string(&frame).unwrap();
+        let back: ClientFrame = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, frame);
+    }
+
+    #[test]
+    fn publish_without_key_omits_field() {
+        let frame = ClientFrame::Publish {
+            id: "p1".into(),
+            stream: "presence".into(),
+            key: None,
+            payload: json!({"online": true}),
+        };
+        let s = serde_json::to_string(&frame).unwrap();
+        assert!(!s.contains("\"key\""));
+        let back: ClientFrame = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, frame);
+    }
+
+    #[test]
+    fn publish_missing_key_field_parses_as_none() {
+        let raw = r#"{"type":"publish","id":"p1","stream":"presence","payload":{"online":true}}"#;
+        let frame: ClientFrame = serde_json::from_str(raw).unwrap();
+        assert_eq!(
+            frame,
+            ClientFrame::Publish {
+                id: "p1".into(),
+                stream: "presence".into(),
+                key: None,
+                payload: json!({"online": true}),
+            }
+        );
+    }
+
+    #[test]
+    fn publish_null_payload_is_allowed() {
+        // Mirrors EventEnvelope's "explicit null payload is allowed"
+        // semantics — a publish carrying `payload: null` round-trips.
+        let frame = ClientFrame::Publish {
+            id: "p1".into(),
+            stream: "presence".into(),
+            key: None,
+            payload: Value::Null,
+        };
+        let s = serde_json::to_string(&frame).unwrap();
+        let back: ClientFrame = serde_json::from_str(&s).unwrap();
+        assert_eq!(back, frame);
+    }
+
+    #[test]
+    fn publish_missing_payload_fails_to_parse() {
+        let raw = r#"{"type":"publish","id":"p1","stream":"presence"}"#;
+        let res: Result<ClientFrame, _> = serde_json::from_str(raw);
+        assert!(res.is_err(), "payload is required on publish");
     }
 
     #[test]

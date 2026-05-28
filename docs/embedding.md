@@ -203,11 +203,11 @@ exist and which roles may subscribe to each.
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
   - stream: presence
-    audience: [role:member]
+    subscribe: [role:member]
   - stream: ops_logs
-    audience: [role:operator]
+    subscribe: [role:operator]
 ```
 
 Provide the file path via `WSS_MUX_STREAMS_MANIFEST_PATH`.
@@ -231,11 +231,11 @@ one of three ways:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member, role:operator]
+    subscribe: [role:member, role:operator]
   - stream: tenant_events
-    audience: [tenant:*]            # any tenant principal
+    subscribe: [tenant:*]            # any tenant principal
   - stream: status_page
-    audience: ["*"]                 # public to any authenticated client
+    subscribe: ["*"]                 # public to any authenticated client
 ```
 
 A `*` is only valid as a single trailing wildcard (or the bare `*`).
@@ -250,6 +250,42 @@ Subscribe-time behavior:
 - No audience entry admits the principals → `unauthorized_subscribe`
   error.
 
+### Publish audience (WS publish)
+
+The `subscribe` field above governs *read*: who may `subscribe` to
+this stream. For *write* — `publish` over an open WebSocket — declare
+a parallel `publish` field. Same matching rules as `subscribe`;
+default empty, which means **no one may WS-publish to this stream**
+until you opt in.
+
+```yaml
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    publish:   [role:member]      # members may both subscribe and publish
+  - stream: ops_logs
+    subscribe: [role:operator]
+    publish:   []                  # operators read; nobody WS-publishes
+                                   # (HTTP POST /events still works if
+                                   #  the push token is configured)
+```
+
+HTTP `POST /events` is unaffected by `publish` — it authenticates via
+the shared `WSS_MUX_PUSH_AUTH_TOKEN`, not principals. `publish` gates
+the WS `publish` frame only.
+
+Publish-time behavior:
+
+- Stream not in the manifest → `unknown_stream` error.
+- No `publish` entry admits the principals → `unauthorized_publish`.
+- Payload exceeds the stream's `max_payload_bytes` cap →
+  `publish_payload_too_large`.
+- Per-source publish rate limit exceeded → `rate_limited`.
+
+All are keep-open errors — a rejected publish does not close the
+connection.
+
 ### Per-stream payload cap
 
 A stream may declare an optional `max_payload_bytes`. A push whose
@@ -260,7 +296,7 @@ relay:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     max_payload_bytes: 16384      # 16 KiB, guards fanout amplification
 ```
 
@@ -286,10 +322,10 @@ stream's manifest `queue_depth` if set, else the global
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     queue_depth: 64               # this stream's subscribers are bursty-tolerant
   - stream: audit_log
-    audience: [role:admin]
+    subscribe: [role:admin]
     queue_depth: 0                # never drop audit events for slowness
 ```
 

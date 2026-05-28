@@ -14,12 +14,22 @@ pub struct Manifest {
 pub struct Stream {
     #[serde(rename = "stream")]
     pub name: String,
-    pub audience: Vec<String>,
+    /// Principals admitted to the `subscribe` action on this stream.
+    /// Matching rules: exact match, trailing-`*` prefix, or the bare
+    /// `*` (which admits any authenticated connection).
+    pub subscribe: Vec<String>,
+    /// Principals admitted to the WS `publish` action on this stream.
+    /// Default empty ⇒ no one may WS-publish here (explicit opt-in
+    /// per stream). HTTP `POST /events` is unaffected — it uses the
+    /// shared `WSS_MUX_PUSH_AUTH_TOKEN`, not principal audience.
+    /// Same matching rules as `subscribe`.
+    #[serde(default)]
+    pub publish: Vec<String>,
     /// Optional per-stream payload cap, measured as the length of the
     /// JSON serialization of the event payload (stable regardless of
     /// the producer/relay wire codec). Absent ⇒ no cap. A push whose
     /// payload exceeds it is rejected; in a batch, one oversized event
-    /// rejects the whole batch.
+    /// rejects the whole batch. The same cap applies to WS publish.
     #[serde(default)]
     pub max_payload_bytes: Option<u64>,
     /// Optional per-stream send-queue depth override. Absent ⇒ the
@@ -46,14 +56,16 @@ pub enum ManifestError {
     },
     #[error("unsupported manifest version {0} (only version 1 is supported)")]
     UnsupportedVersion(u32),
-    #[error("stream `{0}` has an empty audience")]
-    EmptyAudience(String),
+    #[error("stream `{0}` has an empty `subscribe` audience")]
+    EmptySubscribe(String),
     #[error("duplicate stream name `{0}`")]
     DuplicateStream(String),
     #[error(
         "stream `{stream}` audience entry `{entry}` may only use `*` as a single trailing wildcard"
     )]
     InvalidWildcard { stream: String, entry: String },
+    // (The error term "audience entry" here refers generically to a
+    // principal pattern used in either `subscribe` or `publish`.)
     #[error("stream `{0}` has max_payload_bytes: 0, which rejects every event")]
     ZeroMaxPayload(String),
 }
@@ -83,13 +95,12 @@ impl Manifest {
         }
         let mut seen = HashSet::new();
         for stream in &self.streams {
-            if stream.audience.is_empty() {
-                return Err(ManifestError::EmptyAudience(stream.name.clone()));
+            if stream.subscribe.is_empty() {
+                return Err(ManifestError::EmptySubscribe(stream.name.clone()));
             }
-            for entry in &stream.audience {
-                // A `*` is only meaningful as a single trailing
-                // wildcard (or the bare `*`). Reject any other use so
-                // the prefix-match semantics stay unambiguous.
+            // Same wildcard rules apply to `subscribe` and `publish`:
+            // a single trailing `*` is the only star allowed.
+            for entry in stream.subscribe.iter().chain(stream.publish.iter()) {
                 let stars = entry.matches('*').count();
                 if stars > 1 || (stars == 1 && !entry.ends_with('*')) {
                     return Err(ManifestError::InvalidWildcard {
@@ -124,9 +135,9 @@ mod tests {
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
   - stream: presence
-    audience: [role:member, role:operator]
+    subscribe: [role:member, role:operator]
 "#;
 
     fn p() -> &'static Path {
@@ -139,9 +150,9 @@ streams:
         assert_eq!(m.version, 1);
         assert_eq!(m.streams.len(), 2);
         assert_eq!(m.streams[0].name, "chat_messages");
-        assert_eq!(m.streams[0].audience, vec!["role:member".to_string()]);
+        assert_eq!(m.streams[0].subscribe, vec!["role:member".to_string()]);
         assert_eq!(m.streams[1].name, "presence");
-        assert_eq!(m.streams[1].audience.len(), 2);
+        assert_eq!(m.streams[1].subscribe.len(), 2);
     }
 
     #[test]
@@ -152,16 +163,16 @@ streams:
     }
 
     #[test]
-    fn rejects_empty_audience() {
+    fn rejects_empty_subscribe() {
         let s = r#"
 version: 1
 streams:
   - stream: chat_messages
-    audience: []
+    subscribe: []
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         match err {
-            ManifestError::EmptyAudience(name) => assert_eq!(name, "chat_messages"),
+            ManifestError::EmptySubscribe(name) => assert_eq!(name, "chat_messages"),
             other => panic!("unexpected error: {other:?}"),
         }
     }
@@ -172,9 +183,9 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
   - stream: chat_messages
-    audience: [role:operator]
+    subscribe: [role:operator]
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         match err {
@@ -189,16 +200,16 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:*]
+    subscribe: [role:*]
   - stream: public_feed
-    audience: ["*"]
+    subscribe: ["*"]
   - stream: tenant_events
-    audience: [tenant:*, role:operator]
+    subscribe: [tenant:*, role:operator]
 "#;
         let m = Manifest::from_str(s, p()).expect("manifest");
         assert_eq!(m.streams.len(), 3);
-        assert_eq!(m.streams[0].audience, vec!["role:*".to_string()]);
-        assert_eq!(m.streams[1].audience, vec!["*".to_string()]);
+        assert_eq!(m.streams[0].subscribe, vec!["role:*".to_string()]);
+        assert_eq!(m.streams[1].subscribe, vec!["*".to_string()]);
     }
 
     #[test]
@@ -207,7 +218,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [ro*le]
+    subscribe: [ro*le]
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         match err {
@@ -225,7 +236,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: ["*member"]
+    subscribe: ["*member"]
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         assert!(matches!(err, ManifestError::InvalidWildcard { .. }));
@@ -237,7 +248,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: ["a*b*"]
+    subscribe: ["a*b*"]
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
         assert!(matches!(err, ManifestError::InvalidWildcard { .. }));
@@ -249,10 +260,10 @@ streams:
 version: 1
 streams:
   - stream: capped
-    audience: [role:member]
+    subscribe: [role:member]
     max_payload_bytes: 4096
   - stream: uncapped
-    audience: [role:member]
+    subscribe: [role:member]
 "#;
         let m = Manifest::from_str(s, p()).expect("manifest");
         assert_eq!(m.stream("capped").unwrap().max_payload_bytes, Some(4096));
@@ -265,7 +276,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     max_payload_bytes: 0
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
@@ -276,15 +287,92 @@ streams:
     }
 
     #[test]
+    fn publish_defaults_to_empty_when_absent() {
+        // Absent `publish` ⇒ no one may WS-publish to the stream
+        // (default-deny). Manifest still parses; HTTP push is unaffected.
+        let m = Manifest::from_str(VALID, p()).expect("manifest");
+        assert!(m.streams[0].publish.is_empty());
+        assert!(m.streams[1].publish.is_empty());
+    }
+
+    #[test]
+    fn parses_explicit_publish_audience() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    publish: [role:member]
+  - stream: presence
+    subscribe: [role:member, role:operator]
+    publish: [role:member]
+"#;
+        let m = Manifest::from_str(s, p()).expect("manifest");
+        assert_eq!(
+            m.stream("chat_messages").unwrap().publish,
+            vec!["role:member".to_string()]
+        );
+        assert_eq!(
+            m.stream("presence").unwrap().publish,
+            vec!["role:member".to_string()]
+        );
+    }
+
+    #[test]
+    fn publish_wildcard_rules_match_subscribe() {
+        // Trailing-star and bare-star are accepted just like audience.
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    publish: [role:*]
+  - stream: open_feed
+    subscribe: ["*"]
+    publish: ["*"]
+"#;
+        let m = Manifest::from_str(s, p()).expect("manifest");
+        assert_eq!(
+            m.stream("chat_messages").unwrap().publish,
+            vec!["role:*".to_string()]
+        );
+        assert_eq!(
+            m.stream("open_feed").unwrap().publish,
+            vec!["*".to_string()]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_wildcard_in_publish() {
+        // Same rejection as for audience — a star anywhere but a single
+        // trailing position is rejected at load.
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    publish: ["ro*le"]
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        match err {
+            ManifestError::InvalidWildcard { stream, entry } => {
+                assert_eq!(stream, "chat_messages");
+                assert_eq!(entry, "ro*le");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_optional_queue_depth() {
         let s = r#"
 version: 1
 streams:
   - stream: bursty
-    audience: [role:member]
+    subscribe: [role:member]
     queue_depth: 64
   - stream: defaulted
-    audience: [role:member]
+    subscribe: [role:member]
 "#;
         let m = Manifest::from_str(s, p()).expect("manifest");
         assert_eq!(m.stream("bursty").unwrap().queue_depth, Some(64));
@@ -300,7 +388,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     queue_depth: 0
 "#;
         let m = Manifest::from_str(s, p()).expect("valid manifest");
@@ -318,7 +406,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     queue_depth: -1
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");
@@ -334,7 +422,7 @@ streams:
 version: 1
 streams:
   - stream: chat_messages
-    audience: [role:member]
+    subscribe: [role:member]
     max_payload_bytes: -1
 "#;
         let err = Manifest::from_str(s, p()).expect_err("error");

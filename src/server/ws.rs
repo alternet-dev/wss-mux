@@ -232,11 +232,14 @@ fn parse_client_frame_cbor(bytes: &[u8]) -> Result<ClientFrame, ProtocolError> {
 }
 
 /// The correlation id to echo in an `error` frame for a given client
-/// frame — `subscribe`/`unsubscribe` carry one, `auth` does not.
+/// frame — `subscribe`/`unsubscribe`/`publish` carry one, `auth` does
+/// not.
 fn client_frame_id(frame: &ClientFrame) -> Option<String> {
     match frame {
         ClientFrame::Auth { .. } => None,
-        ClientFrame::Subscribe { id, .. } | ClientFrame::Unsubscribe { id } => Some(id.clone()),
+        ClientFrame::Subscribe { id, .. }
+        | ClientFrame::Unsubscribe { id }
+        | ClientFrame::Publish { id, .. } => Some(id.clone()),
     }
 }
 
@@ -251,7 +254,7 @@ fn revoke_reason(
 ) -> Option<RevokeReason> {
     match manifest.and_then(|m| m.stream(stream)) {
         None => Some(RevokeReason::UnknownStream),
-        Some(s) if !audience_admits(principals, &s.audience) => Some(RevokeReason::Unauthorized),
+        Some(s) if !audience_admits(principals, &s.subscribe) => Some(RevokeReason::Unauthorized),
         Some(_) => None,
     }
 }
@@ -428,7 +431,7 @@ async fn reader_loop(
                 };
                 let Some(audience) = state
                     .manifest()
-                    .and_then(|m| m.stream(&stream).map(|s| s.audience.clone()))
+                    .and_then(|m| m.stream(&stream).map(|s| s.subscribe.clone()))
                 else {
                     let _ = control_tx.try_send(ProtocolError::UnknownStream { id }.to_outbound());
                     continue;
@@ -466,6 +469,14 @@ async fn reader_loop(
                     state.registry().unsubscribe(&stream, conn_id, &id);
                     state.metrics().subscriptions_active.dec();
                 }
+            }
+            // `publish` is recognized at the wire-schema level but not
+            // yet handled — treat the frame as unknown (close 4400)
+            // until the dispatch path is wired in.
+            ClientFrame::Publish { .. } => {
+                let _ = control_tx.try_send(ProtocolError::UnknownFrameType.to_outbound());
+                explicit_close = true;
+                break;
             }
         }
     }

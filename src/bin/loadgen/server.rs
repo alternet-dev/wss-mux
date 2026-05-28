@@ -19,12 +19,12 @@ use wss_mux::server::{build_app, AppState};
 pub const LOADGEN_MANIFEST: &str = r#"version: 1
 streams:
   - stream: loadgen
-    audience: ["*"]
+    subscribe: ["*"]
   - stream: loadgen_slow
-    audience: ["*"]
+    subscribe: ["*"]
     queue_depth: 8
   - stream: loadgen_capped
-    audience: ["*"]
+    subscribe: ["*"]
     max_payload_bytes: 256
 "#;
 

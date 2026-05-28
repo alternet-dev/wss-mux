@@ -48,7 +48,7 @@ async fn reload_dropping_a_stream_revokes_its_subscriptions() {
 
     // Hot-reload to a manifest WITHOUT chat_messages.
     state.set_manifest(manifest(
-        "version: 1\nstreams:\n  - stream: other\n    audience: [role:member]\n",
+        "version: 1\nstreams:\n  - stream: other\n    subscribe: [role:member]\n",
     ));
 
     let (code, id) = recv_error_frame(&mut ws).await;
@@ -95,7 +95,7 @@ async fn reload_tightening_audience_revokes_now_unauthorized_subs() {
 
     // chat_messages now requires role:operator; the connection only has role:member.
     state.set_manifest(manifest(
-        "version: 1\nstreams:\n  - stream: chat_messages\n    audience: [role:operator]\n",
+        "version: 1\nstreams:\n  - stream: chat_messages\n    subscribe: [role:operator]\n",
     ));
 
     let (code, id) = recv_error_frame(&mut ws).await;

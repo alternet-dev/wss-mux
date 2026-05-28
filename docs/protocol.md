@@ -69,6 +69,55 @@ Removes a subscription.
 
 Idempotent. No error if the subscription doesn't exist.
 
+### `publish` (client → server)
+
+WS-side publish: a connected client emits an event without dropping
+back to HTTP `POST /events`. Useful for client-side use cases that
+already have a WebSocket open (chat send, presence beacons, collab
+edits) — the publish shares the connection with subscribe rather
+than opening a parallel HTTP path.
+
+```json
+{
+  "type": "publish",
+  "id": "pub-1",
+  "stream": "chat_messages",
+  "key": "room-42",
+  "payload": { "from": "alice", "text": "hello" }
+}
+```
+
+Fields:
+
+- `id` — client-chosen, opaque correlation identifier. Echoed back on
+  any `error` frame so the client can match a failure to a specific
+  publish call.
+- `stream` — stream name. Must exist in the manifest.
+- `key` — optional. Same semantics as `subscribe` and HTTP push.
+- `payload` — forwarded verbatim, identical to HTTP push's payload.
+
+The server checks the connection's principals against the stream's
+`publish` audience (separate from the read-side `subscribe` audience).
+Same matching rules: exact, trailing-`*` prefix, or bare `*`. Default-
+deny when `publish` is absent from the manifest — opt-in per stream.
+
+- **Success**: dispatched to local and peer subscribers. No ack frame —
+  the publisher's own subscription (if any matches) receives the
+  event through the normal event-frame path.
+- **Failure**: an `error` frame is returned with `id` echoed. The
+  connection stays open. Possible codes:
+  - `unauthorized_publish` — principals do not intersect the
+    stream's `publish` audience.
+  - `unknown_stream` — stream not in the manifest.
+  - `publish_payload_too_large` — payload exceeds the stream's
+    `max_payload_bytes` (same cap HTTP push enforces).
+  - `rate_limited` — per-source publish rate limit exceeded.
+
+The publish path shares the same downstream fanout as HTTP `POST /events`
+— same registry matching, same per-subscription queue, same relay
+coalescing, same peer fanout. Source identity for the per-source rate
+limit is the JWT's `sub` claim from the connection's auth frame.
+
 ### `event` (server → client)
 
 Delivers an event to a matching subscription.
@@ -111,9 +160,11 @@ otherwise.
 | `bad_frame` | frame failed JSON parsing or schema | yes |
 | `unauthenticated` | non-auth frame before auth, or auth failed | yes |
 | `expired_token` | auth token's `exp` claim has passed | yes |
-| `unknown_stream` | subscribe to a stream not in the manifest | no |
+| `unknown_stream` | subscribe or publish to a stream not in the manifest | no |
 | `unauthorized_subscribe` | principals do not intersect stream audience | no |
+| `unauthorized_publish` | principals do not intersect stream `publish` audience | no |
 | `duplicate_subscription_id` | subscribe with an `id` already in use | no |
+| `publish_payload_too_large` | publish payload exceeds the stream's `max_payload_bytes` | no |
 | `rate_limited` | inbound frame rate limit exceeded | no |
 | `overflow` | a subscription exceeded its send-queue depth | no |
 
