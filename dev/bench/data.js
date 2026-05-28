@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1779906209593,
+  "lastUpdate": 1780010449931,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -4318,6 +4318,186 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "438a9d0f3daf3c48141da55c993b6782a4d9773f",
+          "message": "feat(wire): add Publish ClientFrame variant + manifest publish audience (#87)\n\nFirst PR in the WS-publish workstream. Adds the wire schema for the new\n`publish` action and the matching manifest field; leaves the server-\nside dispatch for a follow-up so the wire-level change can land in\nisolation.\n\n## Wire surface\n\n`ClientFrame::Publish { id, stream, key?, payload }` joins the existing\n`Auth`/`Subscribe`/`Unsubscribe` variants. Serde-tagged the same way;\n`key` is optional with the same skip-if-none convention as `subscribe`.\n\nThere is no success ack — same ack-by-absence pattern as subscribe.\nErrors are returned as `error` frames with `id` echoed; new keep-open\nerror codes are documented in `docs/protocol.md`:\n\n- `unauthorized_publish`\n- `publish_payload_too_large`\n- `unknown_stream` (reused; was subscribe-only)\n- `rate_limited` (reused)\n\n## Manifest — rename to action-keyed audiences\n\nRestructure the stream's two principal audiences as actions rather than\nabstract role-nouns. Old single `audience` field becomes `subscribe`;\nthe new write-side audience is `publish`:\n\n  audience  →  subscribe   (read)\n  (new)     →  publish     (write, WS only)\n\nThe field names match the protocol verbs (`ClientFrame::Subscribe` /\n`ClientFrame::Publish`) so the mental model is single across the wire\nand the manifest. Both fields are lists of principal patterns with the\nsame matching rules (exact, trailing-`*` prefix, bare `*`).\n\n`subscribe` is required and must be non-empty (validated at load).\n`publish` defaults to empty ⇒ no one may WS-publish to that stream\nuntil explicit opt-in. HTTP `POST /events` is unaffected — it uses the\nshared `WSS_MUX_PUSH_AUTH_TOKEN`, not principal audience. `publish`\ngates the WS `publish` frame only.\n\n### Manifest migration\n\nExisting manifests using `audience: [...]` must rename to\n`subscribe: [...]`. Pre-1.0 wire-licensed break, documented here:\n\n  streams:\n    - stream: chat_messages\n      subscribe: [role:member]      # was: audience\n      publish:   [role:member]      # new, opt-in\n\nManifestError variant `EmptyAudience` is renamed `EmptySubscribe`.\nThe `audience_admits()` helper keeps its name — it's a generic\nalgorithm operating on a principal-pattern set, not on the renamed\nfield specifically.\n\n## Server-side stub\n\nThe reader-loop match in `src/server/ws.rs` gets an exhaustive\n`ClientFrame::Publish` arm that emits `unknown_frame_type` (close 4400)\nuntil the dispatch path is wired in.\n\n## Docs\n\n- `docs/protocol.md` — new `publish` frame section; error-codes table\n  updated.\n- `docs/embedding.md` — §3 \"Declaring streams and audiences\" YAML\n  examples updated to use `subscribe`; new \"Publish audience (WS\n  publish)\" subsection documenting the parallel `publish` field.\n\n## Why `ClientFrame` lost `Eq`\n\n`Publish` carries `serde_json::Value`, which doesn't implement `Eq`.\n`ClientFrame`'s derive list drops `Eq` accordingly. No callers depend\non it.\n\n## Verification\n\n- `cargo test --all-targets` — 271 tests pass (was 262 on trunk; +9 new).\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.",
+          "timestamp": "2026-05-28T17:13:17-06:00",
+          "tree_id": "05dfa91cde58ceceee27a4c09dc3718132c127c0",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/438a9d0f3daf3c48141da55c993b6782a4d9773f"
+        },
+        "date": 1780010449628,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 251,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1623,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3777,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29493,
+            "range": "± 910",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 324,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2491,
+            "range": "± 59",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 30984,
+            "range": "± 1853",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 376260,
+            "range": "± 26781",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3956474,
+            "range": "± 205763",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 138,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 134,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31897,
+            "range": "± 122",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 162,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 72,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 75,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 337,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 98,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3766,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 150,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 42814,
+            "range": "± 225",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 663,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 365004,
+            "range": "± 4048",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6891,
+            "range": "± 58",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 133,
             "range": "± 0",
             "unit": "ns/iter"
           }
