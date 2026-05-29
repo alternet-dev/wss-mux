@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780013516610,
+  "lastUpdate": 1780036162067,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -4912,6 +4912,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 137,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "eb636a5e7c4ef83503b8aa96e645d6600f582378",
+          "message": "feat(server): per-source rate limit on WS publish (#90)\n\nPlumbs the PerSourceRateLimiter from #89 through `AppState` and the WS\npublish handler. The wire-visible effect: a WS publish frame that\nexceeds the source's bucket is rejected with a keep-open `rate_limited`\nerror frame (echoing the publish `id`). Source key derivation lets two\nWS sessions with the same JWT `sub` share one budget; a missing `sub`\nfalls back to a per-connection key (or is refused outright in strict\nmode).\n\n## Config\n\nFour new env vars, all inert at default:\n\n- `WSS_MUX_WS_PUBLISH_RATE` (default `0` — feature off). When `0`, no\n  limiter is constructed, no sweep task is spawned, the handler arm\n  short-circuits past the rate-limit branch — byte-identical to the\n  pre-feature behaviour.\n- `WSS_MUX_WS_PUBLISH_BURST` (default = `2 * RATE` when set, else `0`).\n- `WSS_MUX_WS_PUBLISH_REQUIRE_SUB` (default `false`). When `true`, a\n  token whose `sub` claim is empty is refused at publish time with\n  `unauthorized_publish` rather than falling back to a per-connection\n  bucket. Operators who want \"no anonymous publishers\" set this.\n- `WSS_MUX_WS_PUBLISH_IDLE_TTL_SECS` (default `300`). Sweep cadence is\n  one tenth this.\n\nA new `parse_bool` helper resolves common truthy/falsy spellings; a new\n`ConfigError::InvalidBool` rejects garbage with a friendly message.\n\n## AppState\n\nNew `ws_publish_limiter: Option<Arc<PerSourceRateLimiter>>` field,\nconstructed in `try_new` iff the config's `ws_publish_rate_per_sec > 0`.\nThe `Arc` lets the same instance be handed to the idle-eviction task\nwithout aliasing the AppState's inner Arc.\n\n## Handler\n\nIn `src/server/ws.rs`:\n\n- The auth arm now also captures `claims.sub` into a connection-local\n  `auth_sub: Option<String>` (alongside the existing `principals`).\n- The publish arm, after the audience and payload-cap checks but before\n  dispatch, consults the limiter when configured:\n\n  Source key resolution:\n\n    JWT sub non-empty                   ⇒ `sub:<sub>`\n    JWT sub empty AND !require_sub      ⇒ `conn:<conn_id>`\n    JWT sub empty AND  require_sub      ⇒ unauthorized_publish\n\n  A rejected publish increments `wss_mux_ws_publish_rate_limited` and\n  emits `rate_limited` (keep-open, echo id). The dispatcher and the\n  peer-relay are not touched.\n\n## Metrics\n\n`wss_mux_ws_publish_rate_limited` counter — no source label\n(cardinality risk).\n\n## Idle eviction task\n\n`src/main.rs` gains `spawn_ws_publish_idle_sweeper(state)`, spawned in\nthe boot sequence next to the peer refresher and the JWKS refresher.\nInert (task not spawned) when the limiter is disabled. Cadence is\n`idle_ttl / 10`, with the tokio interval set to `MissedTickBehavior::\nDelay` so a stalled scheduler doesn't burst-fire missed ticks. Each\nsweep logs the eviction count at `debug` level when non-zero.\n\n## Tests\n\n### Config (`src/config.rs`)\n\nSix new unit tests covering the four env vars + their defaults +\nparse_bool's truthy/falsy/garbage handling.\n\n### Integration (`tests/integration/publish_rate_limit.rs`)\n\nSeven end-to-end tests against a real server:\n\n- `flood_from_one_source_eventually_rate_limited` — burst exhausted,\n  next publish gets `rate_limited`.\n- `two_connections_sharing_sub_share_budget` — same `sub` from two\n  sessions shares one bucket. Uses a subscribe + own-event recv as a\n  sync barrier to avoid the otherwise-racy \"did A's publish land\n  before B's\" ordering.\n- `distinct_subs_have_isolated_budgets` — distinct `sub`s, distinct\n  buckets.\n- `rate_zero_means_no_limit_at_all` — feature-off baseline; 32\n  publishes flow, no `rate_limited`.\n- `empty_sub_falls_back_to_conn_id_when_require_sub_is_off` — two\n  sub-less connections do not share a budget.\n- `empty_sub_is_unauthorized_publish_when_require_sub_is_on` —\n  strict-mode refusal echoes `id`.\n- `rate_limited_metric_increments_on_rejection` — the new counter\n  ticks on rejection.\n\n## Docs\n\n`docs/embedding.md` gains a \"Per-source publish rate limit\" subsection\nunder §3, documenting the four env vars, the source-resolution rules,\nand the metric name.\n\n## Verification\n\n- `cargo test --all-targets` — 298 tests pass (was 291 on trunk; +7 from\n  integration, +6 from config-tests already part of this diff).\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.",
+          "timestamp": "2026-05-29T00:20:37-06:00",
+          "tree_id": "0667e12be632c85a479285f502c75d88a5d479db",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/eb636a5e7c4ef83503b8aa96e645d6600f582378"
+        },
+        "date": 1780036161473,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 310,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1886,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3881,
+            "range": "± 268",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33300,
+            "range": "± 76",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 327,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2420,
+            "range": "± 53",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29252,
+            "range": "± 1921",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 389754,
+            "range": "± 31099",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5965891,
+            "range": "± 467167",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 158,
+            "range": "± 473",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 142,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33796,
+            "range": "± 282",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 168,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 127,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 319,
+            "range": "± 11170",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 353,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1903,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 21200,
+            "range": "± 213",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 75,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 78,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 361,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3867,
+            "range": "± 375",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 146,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 39035,
+            "range": "± 215",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 379083,
+            "range": "± 3574",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6571,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 138,
             "range": "± 0",
             "unit": "ns/iter"
           }
