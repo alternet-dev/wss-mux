@@ -27,6 +27,21 @@ async fn main() -> Result<(), WssMuxError> {
     let mut sub = client
         .subscribe("notification_banner", Some("room-42"))
         .await?;
+
+    // Publish over the same WebSocket. The connection's principals
+    // must intersect the server's `publish` audience for the target
+    // stream.
+    if let Err(e) = client
+        .publish(
+            "chat_messages",
+            Some("room-42"),
+            serde_json::json!({"from": "alice", "text": "hello"}),
+        )
+        .await
+    {
+        eprintln!("publish rejected: {e}");
+    }
+
     println!("subscribed; waiting for events (ctrl-c to exit)");
 
     while let Some(event) = sub.recv().await {

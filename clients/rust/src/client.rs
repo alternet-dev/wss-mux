@@ -33,10 +33,13 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 use crate::error::WssMuxError;
 use crate::types::{
-    ClientFrame, ErrorCode, ServerFrame, SubscriptionId, CLOSE_BAD_FRAME, CLOSE_UNAUTHENTICATED,
-    SUBPROTOCOL_JSON,
+    ClientFrame, ErrorCode, PublishId, ServerFrame, SubscriptionId, CLOSE_BAD_FRAME,
+    CLOSE_UNAUTHENTICATED, SUBPROTOCOL_JSON,
 };
 use crate::EventFrame;
+
+use futures_util::stream::FuturesUnordered;
+use serde_json::Value;
 
 /// Reconnect/backoff configuration. Defaults match the TypeScript SDK.
 #[derive(Debug, Clone)]
@@ -64,7 +67,12 @@ pub struct ClientBuilder {
     url: Option<String>,
     get_token: Option<BoxedTokenSource>,
     reconnect: ReconnectOptions,
+    publish_settle: Duration,
 }
+
+/// Default time `publish()` waits for a possible error frame before
+/// resolving. Matches the TypeScript SDK's `publishSettleMs` default.
+const DEFAULT_PUBLISH_SETTLE: Duration = Duration::from_millis(250);
 
 /// Boxed async token source. The closure is invoked on initial connect
 /// and on reconnect after close code 4401.
@@ -80,6 +88,7 @@ impl ClientBuilder {
             url: None,
             get_token: None,
             reconnect: ReconnectOptions::default(),
+            publish_settle: DEFAULT_PUBLISH_SETTLE,
         }
     }
 
@@ -107,6 +116,15 @@ impl ClientBuilder {
         self
     }
 
+    /// How long [`WssMuxClient::publish`] waits for a possible error
+    /// frame before resolving. Ack-by-absence: within this window
+    /// either an error arrives (reject) or the publish is accepted.
+    /// Default 250 ms — comfortably above typical wide-area RTT.
+    pub fn publish_settle(mut self, dur: Duration) -> Self {
+        self.publish_settle = dur;
+        self
+    }
+
     /// Connect and authenticate, returning a client handle.
     ///
     /// Returns once the WebSocket is open and the auth frame has been
@@ -128,10 +146,13 @@ impl ClientBuilder {
             url,
             get_token,
             reconnect: self.reconnect,
+            publish_settle: self.publish_settle,
             cmd_rx,
             cached_token: None,
             subs: HashMap::new(),
             next_sub_counter: 1,
+            pending_pubs: HashMap::new(),
+            next_pub_counter: 1,
         };
         let join = tokio::spawn(drive.run(ready_tx));
 
@@ -184,6 +205,37 @@ impl WssMuxClient {
                 stream: stream.into(),
                 key: key.map(str::to_owned),
                 drop_tx: self.inner.cmd_tx.clone(),
+                resp: resp_tx,
+            })
+            .map_err(|_| WssMuxError::Closed)?;
+        resp_rx.await.map_err(|_| WssMuxError::Closed)?
+    }
+
+    /// Emit an event on `stream`. Identical downstream semantics to
+    /// HTTP `POST /events` — same per-subscription delivery, same peer
+    /// fanout. The connection's principals must intersect the stream's
+    /// `publish` audience on the server; otherwise the call rejects
+    /// with [`WssMuxError::Protocol`] (`unauthorized_publish`).
+    ///
+    /// Ack-by-absence: the server does not send a success frame. The
+    /// returned future resolves once the configured publish settle
+    /// window elapses without an error frame matching the publish's
+    /// id. If an error arrives in the window the future rejects with
+    /// the matching `Protocol` error. If the connection drops while
+    /// pending, it rejects with [`WssMuxError::ConnectionClosed`].
+    pub async fn publish(
+        &self,
+        stream: impl Into<String>,
+        key: Option<&str>,
+        payload: Value,
+    ) -> Result<(), WssMuxError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        self.inner
+            .cmd_tx
+            .send(Command::Publish {
+                stream: stream.into(),
+                key: key.map(str::to_owned),
+                payload,
                 resp: resp_tx,
             })
             .map_err(|_| WssMuxError::Closed)?;
@@ -276,6 +328,12 @@ enum Command {
     Unsubscribe {
         id: SubscriptionId,
     },
+    Publish {
+        stream: String,
+        key: Option<String>,
+        payload: Value,
+        resp: oneshot::Sender<Result<(), WssMuxError>>,
+    },
     Close {
         ack: oneshot::Sender<()>,
     },
@@ -291,11 +349,21 @@ struct Drive {
     url: String,
     get_token: BoxedTokenSource,
     reconnect: ReconnectOptions,
+    publish_settle: Duration,
     cmd_rx: mpsc::UnboundedReceiver<Command>,
     cached_token: Option<String>,
     subs: HashMap<SubscriptionId, ActiveSub>,
     next_sub_counter: u64,
+    /// Publishes that have been written to the wire but neither rejected
+    /// by an error frame nor passed their settle window. Resolved when
+    /// the settle timer fires; rejected when a matching error arrives or
+    /// the connection drops.
+    pending_pubs: HashMap<PublishId, oneshot::Sender<Result<(), WssMuxError>>>,
+    next_pub_counter: u64,
 }
+
+/// Settle timer: yields a publish id when its settle window elapses.
+type SettleTimer = Pin<Box<dyn Future<Output = PublishId> + Send>>;
 
 impl Drive {
     async fn run(mut self, ready: oneshot::Sender<Result<(), WssMuxError>>) {
@@ -317,9 +385,21 @@ impl Drive {
         loop {
             let outcome = self.run_one_connection(&mut conn).await;
             match outcome {
-                ConnectionOutcome::Closed => break,
+                ConnectionOutcome::Closed => {
+                    self.fail_all_pending_pubs(WssMuxError::Closed);
+                    break;
+                }
                 ConnectionOutcome::ClosedByServer { code, reason } => {
                     let refresh = code == CLOSE_UNAUTHENTICATED;
+
+                    // Pending publishes can't be acked across a fresh
+                    // connection — the server has no record of them.
+                    // Reject immediately rather than letting the settle
+                    // timer eventually resolve them to false-positive Ok.
+                    self.fail_all_pending_pubs(WssMuxError::ConnectionClosed {
+                        code,
+                        reason: reason.clone(),
+                    });
 
                     if code == CLOSE_BAD_FRAME {
                         // Protocol bug on our side; don't loop reconnects.
@@ -365,6 +445,16 @@ impl Drive {
 
     /// Drive a single connection until it closes for any reason.
     async fn run_one_connection(&mut self, conn: &mut Connection) -> ConnectionOutcome {
+        // Per-connection settle timers. A FuturesUnordered lets the
+        // select loop wake on the next-firing timer without polling.
+        // On reconnect we drop the whole set — any timers that hadn't
+        // fired by then belong to publishes whose pending entry was
+        // already rejected by the disconnect path.
+        let mut settle_timers: FuturesUnordered<SettleTimer> = FuturesUnordered::new();
+        // FuturesUnordered::next() returns None when empty AND keeps
+        // returning None thereafter, so the select arm would spin.
+        // The pending() future never resolves; we swap to it whenever
+        // the timer set is empty.
         loop {
             tokio::select! {
                 cmd = self.cmd_rx.recv() => match cmd {
@@ -398,6 +488,28 @@ impl Drive {
                             let _ = send_frame(conn, &frame).await;
                         }
                     }
+                    Some(Command::Publish { stream, key, payload, resp }) => {
+                        let id = self.next_pub_id();
+                        let frame = ClientFrame::Publish {
+                            id: id.clone(),
+                            stream,
+                            key,
+                            payload,
+                        };
+                        if let Err(e) = send_frame(conn, &frame).await {
+                            let _ = resp.send(Err(e));
+                            return ConnectionOutcome::ClosedByServer {
+                                code: 1006,
+                                reason: "write failed".into(),
+                            };
+                        }
+                        self.pending_pubs.insert(id.clone(), resp);
+                        let dur = self.publish_settle;
+                        settle_timers.push(Box::pin(async move {
+                            tokio::time::sleep(dur).await;
+                            id
+                        }));
+                    }
                     Some(Command::Close { ack }) => {
                         // Best-effort clean close frame; ignore errors.
                         let _ = conn.ws.send(Message::Close(Some(CloseFrame {
@@ -412,6 +524,15 @@ impl Drive {
                         return ConnectionOutcome::Closed;
                     }
                 },
+                // Settle next-firing publish, if any. The fallback to
+                // pending() keeps this arm dormant when no timers exist
+                // (FuturesUnordered::next would otherwise yield None
+                // immediately and spin the loop).
+                settled = next_settle_or_pending(&mut settle_timers) => {
+                    if let Some(resp) = self.pending_pubs.remove(&settled) {
+                        let _ = resp.send(Ok(()));
+                    }
+                }
                 msg = conn.ws.next() => match msg {
                     Some(Ok(Message::Text(t))) => {
                         if let Some(outcome) = self.dispatch_text(&t) {
@@ -491,6 +612,18 @@ impl Drive {
             }
             ServerFrame::Error { code, message, id } => {
                 if let Some(id_str) = id {
+                    // Pending publish? Match by id and reject the
+                    // awaited promise. Server publish errors all carry
+                    // the originating publish's id back, so any
+                    // matching id is treated as the publish ack.
+                    if let Some(resp) = self.pending_pubs.remove(&id_str) {
+                        let _ = resp.send(Err(WssMuxError::Protocol {
+                            code,
+                            message,
+                            id: Some(id_str),
+                        }));
+                        return None;
+                    }
                     if matches!(
                         code,
                         ErrorCode::UnknownStream
@@ -555,6 +688,18 @@ impl Drive {
         id
     }
 
+    fn next_pub_id(&mut self) -> PublishId {
+        let id = format!("pub-{}", self.next_pub_counter);
+        self.next_pub_counter += 1;
+        id
+    }
+
+    fn fail_all_pending_pubs(&mut self, err: WssMuxError) {
+        for (_, resp) in self.pending_pubs.drain() {
+            let _ = resp.send(Err(err.clone()));
+        }
+    }
+
     fn fail_all_subs(&mut self, err: WssMuxError) {
         for (_, sub) in self.subs.drain() {
             let _ = sub.tx.send(Err(err.clone()));
@@ -590,6 +735,20 @@ fn map_ws_error(e: WsError) -> WssMuxError {
     match e {
         WsError::ConnectionClosed | WsError::AlreadyClosed => WssMuxError::Closed,
         other => WssMuxError::Transport(other.to_string()),
+    }
+}
+
+/// Returns the next-settling publish id, or sleeps forever if the
+/// timer set is empty (so the select arm stays parked instead of
+/// busy-yielding `None` from an exhausted `FuturesUnordered`).
+async fn next_settle_or_pending(set: &mut FuturesUnordered<SettleTimer>) -> PublishId {
+    if set.is_empty() {
+        std::future::pending::<PublishId>().await
+    } else {
+        match set.next().await {
+            Some(id) => id,
+            None => std::future::pending::<PublishId>().await,
+        }
     }
 }
 
