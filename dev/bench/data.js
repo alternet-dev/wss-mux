@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780036162067,
+  "lastUpdate": 1780077993838,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -5146,6 +5146,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 138,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "25bca3f740ff9f1a958f31b066e07ec19049c3f5",
+          "message": "feat(http): SSE read endpoint at GET /events/:stream (#91)\n\nAdd an HTTP read path that streams events as Server-Sent Events. Sibling\nof `POST /events` (produce): path-based stream selection so the URL\nreads cleanly. Optional `?key=<value>` query param narrows to one key.\n\nThe HTTP path is the consumer story for service-to-service integrations\nthat don't want a long-lived WebSocket — e.g. a separate presence_svc\nsubscribing to a `presence` stream that clients publish their heartbeat\nto. From the consumer's perspective: one curl-style GET, `text/event-\nstream` response, `data:` line per event.\n\n## Auth\n\nTwo paths, both supported simultaneously; operators expose whichever\nfits the deployment, or both:\n\n- **Shared bearer** via `WSS_MUX_READ_AUTH_TOKEN`. Constant-time\n  compare; no audience check (full read across streams). Mirrors the\n  produce-side `WSS_MUX_PUSH_AUTH_TOKEN`.\n- **JWT** via the existing handshake / OIDC validators. The token's\n  principals must intersect the stream's `subscribe` audience —\n  identical posture to WS subscribe.\n\nThe handler tries shared-bearer first, then falls back to JWT. With\nneither configured the endpoint 401s every request.\n\n## Backpressure\n\nThe SSE consumer registers a regular per-sub subscription in the\nregistry, so the existing dispatcher path drives it without any\nspecial-case code. The per-consumer queue depth uses the same\n`WSS_MUX_QUEUE_DEPTH` knob as WS subscribers. On overflow the\ndispatcher emits a keep-open `overflow` error on the consumer's\ncontrol channel; the SSE response stream observes that, emits a final\n`event: error\\ndata: overflow\\n\\n`, and ends.\n\n## Drop / cleanup\n\n`SseSubscription` (the response body) has a `Drop` impl that\nunregisters the subscription. When the consumer disconnects, axum\ndrops the response body — the same path covers both clean and dirty\ndisconnects with no extra plumbing.\n\n## No replay\n\n`Last-Event-ID` is not honored; a reconnecting consumer picks up new\nevents from the reconnect point forward. Documented in\n`docs/embedding.md`. A replay buffer is future work.\n\n## Config\n\nOne new env var: `WSS_MUX_READ_AUTH_TOKEN`. Defaults to unset — the\nendpoint accepts only JWTs when no shared bearer is configured. A\nwhitespace-only value is treated as unset (otherwise an operator with\na quoted-empty env-var would unintentionally admit `Bearer ` requests).\n\n## Tests\n\n### Unit (`src/config.rs`)\n\nThree new tests: default-unset, set-from-env, blank-treated-as-unset.\n\n### Integration (`tests/integration/sse_read.rs`)\n\nNine tests against a live server:\n\n- shared_bearer_consumer_receives_pushed_event — happy path\n- key_query_param_narrows_to_one_key — `?key=` filters correctly\n- jwt_admit_when_principals_intersect_subscribe_audience — JWT path\n- jwt_forbidden_when_principals_dont_intersect — JWT denied\n- no_bearer_is_401\n- wrong_shared_bearer_falls_through_to_jwt_and_401s — wrong shared\n  bearer does NOT silently admit\n- unknown_stream_is_404\n- dropping_the_response_unregisters_the_subscription — cleanup path\n- shared_bearer_takes_priority_over_jwt — both paths can coexist\n\nBackpressure overflow is not asserted end-to-end here; the per-sub\noverflow code path is the same one WS subscribers use and is already\ncovered by the dispatcher's own tests. A stress test would be the\nright place to wire in a wall-clock-driven assertion.\n\n## Docs\n\n`docs/embedding.md` gains a \"Reading events over HTTP (SSE)\" section\ndocumenting the path shape, auth matrix, replay/backpressure semantics,\nand a curl example.\n\n## Verification\n\n- `cargo test --all-targets` — 310 tests pass (was 301 on trunk; +9\n  integration tests; +3 config unit tests already part of the diff).\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.",
+          "timestamp": "2026-05-29T11:57:53-06:00",
+          "tree_id": "fe65b9d49e4db7cc656ebf20c961ebea8875dd93",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/25bca3f740ff9f1a958f31b066e07ec19049c3f5"
+        },
+        "date": 1780077993483,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 247,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1617,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3629,
+            "range": "± 117",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29140,
+            "range": "± 130",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 323,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2435,
+            "range": "± 46",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29165,
+            "range": "± 1238",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 380948,
+            "range": "± 22698",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4934700,
+            "range": "± 376049",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 139,
+            "range": "± 397",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 132,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31631,
+            "range": "± 474",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 155,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 46,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 127,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 145,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 301,
+            "range": "± 3221",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 332,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1939,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 24948,
+            "range": "± 513",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 412,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2337,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 151,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 43573,
+            "range": "± 176",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 661,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 374875,
+            "range": "± 2126",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6942,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 133,
             "range": "± 0",
             "unit": "ns/iter"
           }
