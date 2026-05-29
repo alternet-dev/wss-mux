@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780010993538,
+  "lastUpdate": 1780013516610,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -4678,6 +4678,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 132,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f8d7012258fc0d9dd88bd98b7c3a19c0978bd14b",
+          "message": "feat(ratelimit): add PerSourceRateLimiter + idle eviction (#89)\n\nFoundation for per-source rate limiting on WS publish (and eventually\non HTTP push). Builds on the existing `TokenBucket` rather than\nduplicating it — every source gets its own bucket; the pool just\nmanages keyed lookup, lazy insert, and idle eviction.\n\nThe shape:\n\n  pub struct PerSourceRateLimiter {\n      buckets: DashMap<String, Mutex<BucketEntry>>,\n      capacity: u32,\n      refill_per_sec: u32,\n      idle_ttl: Duration,\n  }\n\n`try_take(&self, source, now)` returns the same `bool` admit/reject\ncontract as `TokenBucket::try_take`. The `now` is also recorded as the\nentry's `last_seen` so the idle sweep can find stale entries.\n\n`sweep_idle(&self, now)` drops entries whose `last_seen` is older than\n`now - idle_ttl` and returns the eviction count. Intended for a low-\nfrequency tokio interval task, not the publish hot path.\n\n`active_sources()` returns the tracked-source count, surfaced later as\na Prometheus gauge.\n\n## Hot-path properties\n\n- **DashMap** for sharded concurrent access — no global Mutex.\n- **Per-bucket Mutex** held only for the refill + take, not for the\n  DashMap lookup.\n- **Get-or-insert with race-safe fallback** — if two connections from a\n  newly-seen source race the first `try_take`, the DashMap `Entry` API\n  resolves the race without double-admitting or double-counting.\n- **First-take admits when capacity > 0** — a fresh source starts with\n  a full burst (matches `TokenBucket::new`).\n\n## Tests\n\nSeven new unit tests in `src/ratelimit.rs`:\n\n- Distinct sources are isolated (one's bucket doesn't touch another's).\n- Same source key shared across \"connections\" shares one bucket\n  (the pool's keying contract — two WS sessions with the same JWT\n  `sub` share the budget).\n- Refill over elapsed time.\n- First-take from a never-seen source admits the full burst.\n- Sweep evicts entries past TTL while preserving recently-touched ones.\n- Sweep with `now == last_seen` for every entry leaves them alone\n  (off-by-one guard on the cutoff math).\n- Zero-capacity rejects the first publish from every source.\n\n## Bench\n\n`benches/per_source_rate_limit.rs` covers the publish-path hot loop:\n\n- Steady-state, single source (warm-path lookup + take).\n- Steady-state mixed across N sources (10, 100, 1k, 10k) — picks up\n  any DashMap shard contention the single-source bench can't.\n- Cold insert (first take for a never-seen source).\n- Sweep cost vs map size (100, 1k, 10k entries, no eviction — the\n  realistic baseline).\n\nLocal quick-run numbers:\n\n- per_source_try_take_hit:         ~145 ns\n- per_source_try_take_cold_insert: ~580 ns\n- per_source_sweep_idle/10k:       ~80 µs\n\nRegistered as a new `[[bench]]` entry in `Cargo.toml`.\n\n## Verification\n\n- `cargo test --all-targets` — 285 tests pass (was 278 on trunk; +7 new).\n- `cargo clippy --all-targets --all-features -- -D warnings` — clean.\n- `cargo fmt --all -- --check` — clean.\n- `cargo bench --bench per_source_rate_limit -- --quick` — runs.",
+          "timestamp": "2026-05-28T18:03:16-06:00",
+          "tree_id": "f22dceb6994a938e5813bfc3d6eefe8d5a887488",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/f8d7012258fc0d9dd88bd98b7c3a19c0978bd14b"
+        },
+        "date": 1780013516215,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 307,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1879,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3917,
+            "range": "± 22",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33261,
+            "range": "± 119",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 331,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2441,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 31179,
+            "range": "± 1870",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 385707,
+            "range": "± 35481",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4464523,
+            "range": "± 874809",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 160,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 139,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33315,
+            "range": "± 739",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 166,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 88,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 128,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 129,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 148,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 338,
+            "range": "± 77",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 354,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1906,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 21326,
+            "range": "± 193",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 75,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 79,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 505,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 102,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3904,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 39004,
+            "range": "± 296",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 737,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 386134,
+            "range": "± 1324",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6563,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 137,
             "range": "± 0",
             "unit": "ns/iter"
           }
