@@ -1,13 +1,22 @@
+use std::convert::Infallible;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::Json;
+use futures_util::Stream;
+use serde::Deserialize;
 use serde_json::Value;
 
+use crate::auth::{audience_admits, AuthError};
 use crate::config::Config;
+use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx};
 use crate::dispatcher::{dispatch, EventOrigin};
-use crate::envelope::{EnvelopePaths, EventEnvelope};
+use crate::envelope::{EnvelopePaths, EventEnvelope, ServerFrame};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
 use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
@@ -152,6 +161,215 @@ pub async fn relay_receive(
 
     accept_events(&state, batch.events, EventOrigin::Peer)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /events/:stream` — read events from a single stream as a
+/// `text/event-stream` response. Sibling of `POST /events` (produce):
+/// path-based stream selection so the URL reads cleanly. Optional
+/// `?key=<value>` narrows to a single key, matching `subscribe`
+/// semantics.
+///
+/// Auth supports two paths, configurable per deployment:
+///
+/// 1. **Shared bearer** — if `WSS_MUX_READ_AUTH_TOKEN` is set,
+///    `Authorization: Bearer <that-token>` is admitted without any
+///    audience check (full read across streams). Designed for
+///    service-to-service consumers like a future `presence_svc`.
+/// 2. **JWT** — the connecting token's principals must intersect the
+///    stream's `subscribe` audience. Reuses the same validators as
+///    WS subscribe (handshake key or OIDC).
+///
+/// Try shared-bearer first (cheap constant-time compare); fall back to
+/// JWT. Both unset ⇒ 401 on every request.
+///
+/// No replay support: a reconnecting consumer picks up new events from
+/// the reconnect point forward. `Last-Event-ID` is not honored.
+///
+/// Backpressure: per-consumer queue depth uses the same
+/// `WSS_MUX_QUEUE_DEPTH` knob as WS subscribers. On overflow, the SSE
+/// stream emits a final `event: error\ndata: overflow\n\n` and ends.
+pub async fn sse_read(
+    Path(stream_name): Path<String>,
+    Query(query): Query<SseQuery>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Sse<SseSubscription>, (StatusCode, &'static str)> {
+    let bearer =
+        bearer_token(&headers).ok_or((StatusCode::UNAUTHORIZED, "missing or malformed bearer"))?;
+    let auth = authenticate_read(&state, bearer)?;
+
+    let manifest = state
+        .manifest()
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "manifest not loaded"))?;
+    let stream_cfg = manifest
+        .stream(&stream_name)
+        .cloned()
+        .ok_or((StatusCode::NOT_FOUND, "unknown stream"))?;
+
+    // The JWT path is audience-checked; the shared-bearer path is not
+    // (the shared bearer carries no principal context — it admits full
+    // read across streams, matching the produce-side `PUSH_AUTH_TOKEN`).
+    if let ReadAuth::Jwt { principals } = &auth {
+        if !audience_admits(principals, &stream_cfg.subscribe) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "principals do not intersect stream subscribe audience",
+            ));
+        }
+    }
+
+    // Register as a one-shot subscription. Sub id is a constant — there
+    // is one subscription per SSE connection (the path selects the
+    // stream; the optional query parameter narrows by key).
+    let conn_id = state.next_conn_id();
+    let sub_id = "sse".to_string();
+    let cap = stream_cfg.queue_depth.unwrap_or(state.config().queue_depth);
+    let (sub_tx, sub_rx) = outbound_channel(cap);
+    // Control is unbounded; it carries the keep-open `overflow` error
+    // from the dispatcher, which is what triggers the final SSE error
+    // event before this stream ends.
+    let (ctl_tx, ctl_rx) = outbound_channel(0);
+
+    state.register_control(conn_id, ctl_tx);
+    state.register_sub_sender(conn_id, &sub_id, sub_tx, cap);
+    state
+        .registry()
+        .subscribe(&stream_name, conn_id, sub_id.clone(), query.key.clone());
+    state.metrics().subscriptions_active.inc();
+
+    let sub = SseSubscription {
+        state: state.clone(),
+        conn_id,
+        stream_name,
+        sub_id,
+        sub_rx,
+        ctl_rx,
+        closing: false,
+    };
+
+    // A periodic SSE comment keeps idle connections from being torn
+    // down by intermediaries (proxies/LBs) that drop quiet HTTP/1.1
+    // streams. Default cadence (15s) is fine.
+    Ok(Sse::new(sub).keep_alive(KeepAlive::default()))
+}
+
+/// Query string for [`sse_read`]. `key` mirrors the `subscribe` frame's
+/// optional key narrowing.
+#[derive(Debug, Deserialize)]
+pub struct SseQuery {
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+/// Which auth path admitted the SSE request — relevant because the
+/// JWT path is audience-checked while the shared-bearer path is not.
+enum ReadAuth {
+    SharedBearer,
+    Jwt { principals: Vec<String> },
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
+fn authenticate_read(
+    state: &AppState,
+    bearer: &str,
+) -> Result<ReadAuth, (StatusCode, &'static str)> {
+    if let Some(token) = state.config().read_auth_token.as_deref() {
+        if subtle_eq(bearer.as_bytes(), token.as_bytes()) {
+            return Ok(ReadAuth::SharedBearer);
+        }
+    }
+    let auth_result = match (state.handshake_verifier(), state.oidc_verifier()) {
+        (Some(v), _) => v.validate(bearer),
+        (_, Some(o)) => o.validate(bearer, &state.jwks()),
+        (None, None) => return Err((StatusCode::UNAUTHORIZED, "no validator configured")),
+    };
+    match auth_result {
+        Ok(claims) => Ok(ReadAuth::Jwt {
+            principals: claims.principals,
+        }),
+        Err(AuthError::Expired) => Err((StatusCode::UNAUTHORIZED, "token expired")),
+        Err(AuthError::Invalid(_)) => Err((StatusCode::UNAUTHORIZED, "invalid token")),
+    }
+}
+
+/// SSE response body. Holds the per-sub receiver (where the dispatcher
+/// writes event frames) and the control receiver (where overflow shows
+/// up). `Drop` is the cleanup hook: when the client disconnects axum
+/// drops the response body, which drops this, which unregisters the
+/// subscription so the dispatcher stops trying to write to it.
+pub struct SseSubscription {
+    state: AppState,
+    conn_id: ConnId,
+    stream_name: String,
+    sub_id: String,
+    sub_rx: OutboundRx,
+    ctl_rx: OutboundRx,
+    /// Set after emitting the final overflow event so the next poll
+    /// returns `None` and the response stream ends.
+    closing: bool,
+}
+
+impl Stream for SseSubscription {
+    type Item = Result<Event, Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let me = self.get_mut();
+        if me.closing {
+            return Poll::Ready(None);
+        }
+
+        // Control gets priority: an overflow on the control channel
+        // means this subscription has been dropped by the dispatcher;
+        // we want the SSE consumer to see *why* before the stream ends.
+        match Pin::new(&mut me.ctl_rx).poll_next(cx) {
+            Poll::Ready(Some(Outbound::Frame(ServerFrame::Error { code, .. })))
+                if code == "overflow" =>
+            {
+                me.closing = true;
+                return Poll::Ready(Some(Ok(Event::default().event("error").data("overflow"))));
+            }
+            // Any other control item is unexpected for SSE — fall
+            // through to the event loop and try again on the next poll.
+            Poll::Ready(Some(_)) => {}
+            Poll::Ready(None) => {}
+            Poll::Pending => {}
+        }
+
+        match Pin::new(&mut me.sub_rx).poll_next(cx) {
+            Poll::Ready(Some(Outbound::Frame(mut frame))) => {
+                // The dispatcher echoes the sub id in every event
+                // frame; SSE consumers don't supply or need it (one
+                // stream-key tuple per response), so blank it.
+                if let ServerFrame::Event { id, .. } = &mut frame {
+                    id.clear();
+                }
+                let json = serde_json::to_string(&frame).unwrap_or_default();
+                Poll::Ready(Some(Ok(Event::default().data(json))))
+            }
+            Poll::Ready(Some(_)) => Poll::Pending,
+            Poll::Ready(None) => {
+                me.closing = true;
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for SseSubscription {
+    fn drop(&mut self) {
+        self.state
+            .registry()
+            .unsubscribe(&self.stream_name, self.conn_id, &self.sub_id);
+        self.state.remove_connection(self.conn_id);
+        self.state.metrics().subscriptions_active.dec();
+    }
 }
 
 fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, &'static str)> {

@@ -17,4 +17,5 @@ mod rate_limit;
 mod ready;
 mod reconnect;
 mod relay;
+mod sse_read;
 mod wildcards;

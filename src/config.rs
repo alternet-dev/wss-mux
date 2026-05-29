@@ -85,6 +85,16 @@ pub struct Config {
     /// exclusive with `handshake_keys`).
     pub oidc: Option<OidcConfig>,
     pub manifest_path: PathBuf,
+    /// Optional shared bearer that authenticates the SSE read endpoint
+    /// (`GET /events/:stream`). When set, a request whose
+    /// `Authorization: Bearer <token>` matches is admitted without
+    /// any principal/audience check — full read access across streams,
+    /// matching the posture of `WSS_MUX_PUSH_AUTH_TOKEN` on the
+    /// produce side. When unset, the SSE endpoint accepts only JWTs
+    /// (and only when the connection's principals intersect the
+    /// stream's `subscribe` audience). Both can coexist; either path
+    /// alone admits.
+    pub read_auth_token: Option<String>,
     pub queue_depth: usize,
     /// Dotted path into the push body where the stream name lives.
     /// Default `stream`. Object traversal only (no array indexing); an
@@ -256,6 +266,7 @@ impl Config {
             handshake_keys,
             oidc: None,
             manifest_path,
+            read_auth_token: None,
             queue_depth: DEFAULT_QUEUE_DEPTH,
             envelope_stream_path: DEFAULT_ENVELOPE_STREAM_PATH.to_string(),
             envelope_key_path: DEFAULT_ENVELOPE_KEY_PATH.to_string(),
@@ -317,6 +328,10 @@ impl Config {
         let manifest_path: PathBuf = get("WSS_MUX_STREAMS_MANIFEST_PATH")
             .ok_or(ConfigError::Missing("WSS_MUX_STREAMS_MANIFEST_PATH"))?
             .into();
+
+        let read_auth_token = get("WSS_MUX_READ_AUTH_TOKEN")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         let queue_depth = match get("WSS_MUX_QUEUE_DEPTH") {
             Some(v) => {
@@ -486,6 +501,7 @@ impl Config {
             handshake_keys,
             oidc,
             manifest_path,
+            read_auth_token,
             queue_depth,
             envelope_stream_path,
             envelope_key_path,
@@ -638,6 +654,31 @@ mod tests {
         pairs.push(("WSS_MUX_WS_PUBLISH_IDLE_TTL_SECS", "60"));
         let cfg = Config::from_getter(env(&pairs)).expect("config");
         assert_eq!(cfg.ws_publish_idle_ttl, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn read_auth_token_unset_by_default() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert!(cfg.read_auth_token.is_none());
+    }
+
+    #[test]
+    fn read_auth_token_set_from_env() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_READ_AUTH_TOKEN", "read-secret"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.read_auth_token.as_deref(), Some("read-secret"));
+    }
+
+    #[test]
+    fn read_auth_token_blank_is_treated_as_unset() {
+        // A whitespace-only value is the same as missing — protects
+        // operators against a quoted-empty env-var that would
+        // otherwise admit a `Bearer ` (empty token) request.
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_READ_AUTH_TOKEN", "   "));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert!(cfg.read_auth_token.is_none());
     }
 
     #[test]
