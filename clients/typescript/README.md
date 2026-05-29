@@ -122,6 +122,8 @@ npm run typecheck
 npm run build
 npm test          # unit tests via node:test
 npm run test:e2e  # against a real wss-mux instance; see tests/e2e.test.mjs
+                  # — the repo-level harness at `tests/e2e/run.sh` boots a
+                  # wss-mux binary and exports the env vars this suite reads.
 ```
 
 ## License
