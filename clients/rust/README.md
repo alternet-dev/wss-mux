@@ -120,6 +120,11 @@ dropped before it could settle.
 
 ## Development
 
+End-to-end against a real server lives in
+[`tests/e2e/`](../../tests/e2e/) at the repo root — `tests/e2e/run.sh`
+boots a `wss-mux` binary, mints a JWT, and runs the SDK's gated
+`tests/e2e.rs` suite (alongside the TS SDK's).
+
 ```bash
 cargo build
 cargo test

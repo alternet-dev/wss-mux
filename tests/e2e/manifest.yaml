@@ -1,0 +1,17 @@
+# Manifest used by the e2e harness (tests/e2e/run.sh).
+#
+# The harness mints a JWT with principals = ["role:member"], so any
+# stream whose subscribe / publish audience admits that role can be
+# exercised end-to-end. `presence` uses a bare wildcard so a second
+# principal set could also reach it.
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: ["role:member"]
+    publish:   ["role:member"]
+  - stream: presence
+    subscribe: ["*"]
+    publish:   ["*"]
+  - stream: readonly
+    subscribe: ["role:member"]
+    # `publish` absent → default-deny; used to assert unauthorized_publish.

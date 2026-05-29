@@ -1,0 +1,53 @@
+name: SDK e2e
+
+on:
+  push:
+    branches: [trunk]
+    paths:
+      - "src/envelope.rs"
+      - "src/manifest.rs"
+      - "src/server/**"
+      - "src/auth.rs"
+      - "clients/**"
+      - "tests/e2e/**"
+      - ".github/workflows/sdk-e2e.yml"
+  pull_request:
+    branches: [trunk]
+    paths:
+      - "src/envelope.rs"
+      - "src/manifest.rs"
+      - "src/server/**"
+      - "src/auth.rs"
+      - "clients/**"
+      - "tests/e2e/**"
+      - ".github/workflows/sdk-e2e.yml"
+
+concurrency:
+  group: sdk-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cross-sdk:
+    name: cross-sdk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build server
+        # Pre-build so the harness's build step is a cache hit and any
+        # compile error fails the step (rather than the harness step).
+        run: cargo build --release --bin wss-mux
+      - name: Install TS deps
+        working-directory: clients/typescript
+        run: npm install --no-audit --no-fund
+      - name: Run cross-SDK e2e harness
+        run: tests/e2e/run.sh
+        env:
+          # Harness picks an ephemeral-but-fixed port. CI runners are
+          # single-tenant so collisions are not a concern; keep the
+          # default 18080.
+          WSS_MUX_E2E_PORT: "18080"
