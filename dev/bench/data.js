@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780077993838,
+  "lastUpdate": 1780082405990,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -5380,6 +5380,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8806bae660f25546e192c551cf7bc7fe2e1e8d9b",
+          "message": "feat(client-rust): scaffold wss-mux-client crate + subscribe (#93)\n\nAdds a new `clients/rust/` crate that ships a Rust SDK for wss-mux,\nsymmetric in shape with the TypeScript SDK in `clients/typescript/`.\nSubscribe lands in this PR; publish follows in a separate PR; both\nSDKs publish on the same v0.6.0 tag.\n\nThe crate is standalone — no dependency on `wss-mux` the server crate.\nThe handful of wire types it needs are duplicated under\n`src/types.rs` so the SDK's dependency graph stays minimal (`tokio`,\n`tokio-tungstenite`, `serde`, `serde_json`, `thiserror`,\n`futures-util`).\n\n## Surface\n\n```rust\nlet client = WssMuxClient::builder()\n    .url(\"wss://realtime.example.com/stream\")\n    .get_token(|| async { Ok(token_provider.token().await?) })\n    .build()\n    .await?;\n\nlet mut sub = client.subscribe(\"chat_messages\", Some(\"room-42\")).await?;\nwhile let Some(event) = sub.recv().await {\n    match event {\n        Ok(ev) => println!(\"{:?}\", ev.payload),\n        Err(e) => { eprintln!(\"{e}\"); break; }\n    }\n}\n```\n\n`Subscription::recv()` yields `Result<EventFrame, WssMuxError>`. Per-sub\nfatal codes (`unauthorized_subscribe`, `unknown_stream`,\n`duplicate_subscription_id`, `overflow`) deliver one `Err(Protocol)` and\nthen close the channel. Drop on `Subscription` posts an unsubscribe\nover the wire — best-effort if the connection has already gone away.\n\n## Architecture\n\n- `WssMuxClient` is a cheap `Arc`-shared handle. It holds an\n  `mpsc::Sender<Command>` into a single drive task.\n- The drive task is the only owner of the WebSocket halves. It runs a\n  `tokio::select!` over `cmd_rx.recv()` and `ws.next()` and routes\n  events to per-subscription channels.\n- On connection close: if 4400 (`bad_frame`) we fail-fast (it's a\n  protocol bug on our side); on 4401 we refresh the token via\n  `get_token` before reconnecting; otherwise we back off and retry.\n  Active subscriptions replay on every successful reconnect.\n- The `Sec-WebSocket-Protocol: wss-mux` subprotocol is negotiated\n  internally; consumers don't see it.\n- Server pings: explicit Pong reply in the drive task's select arm\n  (tungstenite surfaces Ping to the consumer; not auto-handled).\n\n## Tests\n\n8 integration tests against an inline mock WebSocket server (\n`tests/client.rs`):\n\n- connects + sends auth frame\n- subscribe with key + without key\n- event frame delivered to matching subscription\n- per-sub fatal error frame terminates subscription\n- reconnect + replay subscriptions after server-side close\n- close code 4401 invokes `get_token` again\n- dropping a `Subscription` posts unsubscribe\n\nPlus 5 unit tests in `src/types.rs` covering frame roundtrips and\nerror-code serialization.\n\n`cargo build --all-targets`, `cargo test`, `cargo clippy --all-targets\n-- -D warnings`, `cargo fmt --all -- --check` all green from the crate\nroot.\n\n## CI\n\nNew `.github/workflows/rust-client-ci.yml` mirrors\n`typescript-ci.yml`'s pattern: separate workflow gated on\n`clients/rust/**` paths so server-side PRs don't pay the cost. Uses\n`Swatinem/rust-cache` keyed to the client workspace.\n\n## Out of scope for this PR\n\n- Publish — comes next; `Subscription`'s API surface stays unchanged.\n- Examples beyond `basic.rs`, e2e test gated on a live server, the\n  cargo-publish release step — separate PRs per the plan.",
+          "timestamp": "2026-05-29T13:11:26-06:00",
+          "tree_id": "e6f50e2dec43a630fae185db8aea0fbd6071cdf6",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/8806bae660f25546e192c551cf7bc7fe2e1e8d9b"
+        },
+        "date": 1780082405452,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 254,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1654,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3705,
+            "range": "± 9",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29194,
+            "range": "± 65",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 322,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2355,
+            "range": "± 41",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 30380,
+            "range": "± 1392",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 341049,
+            "range": "± 21784",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3389686,
+            "range": "± 243581",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 139,
+            "range": "± 399",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 32026,
+            "range": "± 436",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 157,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 125,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 127,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 147,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 307,
+            "range": "± 7272",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 332,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1947,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 25262,
+            "range": "± 414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 404,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4225,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 150,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 43901,
+            "range": "± 71",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 664,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 378992,
+            "range": "± 2323",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6950,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 134,
             "range": "± 0",
             "unit": "ns/iter"
           }
