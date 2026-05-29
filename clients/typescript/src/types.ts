@@ -3,6 +3,7 @@
 
 export type StreamName = string;
 export type SubscriptionId = string;
+export type PublishId = string;
 
 /** Client → server: first frame on every connection. */
 export interface AuthFrame {
@@ -25,6 +26,28 @@ export interface UnsubscribeFrame {
   id: SubscriptionId;
 }
 
+/**
+ * Client → server: emit an event on a stream over the existing WS.
+ *
+ * Semantically identical to `POST /events` on the HTTP side — same
+ * downstream dispatch path. The server's per-stream `publish` audience
+ * gates which connections may publish to which streams.
+ *
+ * Ack-by-absence: the server does not send a success frame. If the
+ * publish is rejected, an `error` frame echoes back with this `id` set
+ * (see `ErrorFrame`).
+ */
+export interface PublishFrame {
+  type: "publish";
+  /** Client-chosen id, echoed on errors so the caller can correlate. */
+  id: PublishId;
+  stream: StreamName;
+  /** Optional routing key, same semantics as the subscribe-side `key`. */
+  key?: string;
+  /** Forwarded verbatim to subscribers. */
+  payload: unknown;
+}
+
 /** Server → client: an event matched a subscription. */
 export interface EventFrame {
   type: "event";
@@ -44,7 +67,11 @@ export interface ErrorFrame {
   id?: SubscriptionId;
 }
 
-export type ClientFrame = AuthFrame | SubscribeFrame | UnsubscribeFrame;
+export type ClientFrame =
+  | AuthFrame
+  | SubscribeFrame
+  | UnsubscribeFrame
+  | PublishFrame;
 export type ServerFrame = EventFrame | ErrorFrame;
 
 /** Per docs/protocol.md §"Error codes". */
@@ -55,6 +82,8 @@ export type ErrorCode =
   | "expired_token"
   | "unknown_stream"
   | "unauthorized_subscribe"
+  | "unauthorized_publish"
+  | "publish_payload_too_large"
   | "duplicate_subscription_id"
   | "rate_limited"
   | "overflow";

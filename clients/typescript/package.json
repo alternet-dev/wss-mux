@@ -20,7 +20,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/client.test.mjs tests/reconnect.test.mjs tests/e2e.test.mjs",
+    "test": "node --test tests/client.test.mjs tests/reconnect.test.mjs tests/publish.test.mjs tests/e2e.test.mjs",
     "test:e2e": "WSS_MUX_E2E=1 node --test tests/e2e.test.mjs",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build"

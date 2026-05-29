@@ -21,6 +21,8 @@ export type {
   ErrorCode,
   ErrorFrame,
   EventFrame,
+  PublishFrame,
+  PublishId,
   ServerFrame,
   StreamName,
   SubscribeFrame,

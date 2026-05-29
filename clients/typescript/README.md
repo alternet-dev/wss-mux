@@ -8,6 +8,7 @@ WebSocket multiplexer.
 - Automatic reconnect with exponential backoff.
 - Token refresh via a caller-provided `getToken` callback on initial connect
   and on close-code `4401` (`expired_token`).
+- Subscribe **and** publish over a single WebSocket connection.
 - Typed errors for the documented wss-mux error codes and close codes.
 
 ## Install
@@ -31,6 +32,12 @@ const client = new WssMuxClient({
 
 const sid = await client.subscribe("notification_banner", "*", (event) => {
   console.log(event.payload);
+});
+
+// Publish over the same connection.
+await client.publish("chat_messages", "room-42", {
+  from: "alice",
+  text: "hello",
 });
 
 // later...
@@ -57,6 +64,7 @@ cached token.
 | `reconnect.backoffMultiplier` | `number` | `2` | Backoff multiplier per attempt. |
 | `onError` | `(err: ProtocolError) => void` | — | Called when the server sends an `error` frame. |
 | `onStateChange` | `(state: ConnectionState) => void` | — | Called on connection state transitions. |
+| `publishSettleMs` | `number` | `250` | How long `publish()` waits for a possible error frame before resolving. |
 
 ### `client.subscribe(stream, [key], callback) → Promise<SubscriptionId>`
 
@@ -66,6 +74,21 @@ Omit `key` to receive all events on the stream.
 ### `client.unsubscribe(id) → Promise<void>`
 
 Removes a subscription. Idempotent.
+
+### `client.publish(stream, [key], payload) → Promise<void>`
+
+Emits an event on `stream`. Same downstream dispatch path as the server's
+HTTP `POST /events` — same per-subscription delivery, same coalescing,
+same peer fanout. The connection's principals must intersect the stream's
+`publish` audience on the server; otherwise the call rejects with a
+`ProtocolError` whose `code` is `unauthorized_publish`.
+
+Ack-by-absence: the server does not send a success frame. The returned
+promise resolves once the settle window (`publishSettleMs`, default
+250 ms) elapses without an error frame matching the publish's id. If an
+error frame arrives within the window the promise rejects with the
+matching `ProtocolError`. If the connection drops while pending, it
+rejects with `ConnectionClosedError`.
 
 ### `client.close() → Promise<void>`
 
@@ -81,9 +104,11 @@ Current state: `"idle" | "connecting" | "authenticating" | "ready" |
 
 `ProtocolError` wraps server-sent `error` frames. The `code` field is one
 of the documented wss-mux error codes (`unauthorized_subscribe`,
-`unknown_stream`, `duplicate_subscription_id`, `rate_limited`, `overflow`,
-etc.). For per-subscription fatal codes the SDK automatically removes the
-subscription from its local map.
+`unauthorized_publish`, `publish_payload_too_large`, `unknown_stream`,
+`duplicate_subscription_id`, `rate_limited`, `overflow`, etc.). For
+per-subscription fatal codes the SDK automatically removes the
+subscription from its local map; for publish errors the awaited
+`publish()` promise rejects (and `onError` still fires for parity).
 
 `ConnectionClosedError` is surfaced when the server closes with code
 `4400` (`bad_frame`), which indicates a protocol bug — the SDK does not
