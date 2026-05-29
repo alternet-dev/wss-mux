@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780082405990,
+  "lastUpdate": 1780096013512,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -5615,6 +5615,240 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 134,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4aad55c91db2603621a3f3fc70c2ca509962844a",
+          "message": "feat(client-ts): add publish() to WssMuxClient (#92)\n\nAdds a `publish()` method on `WssMuxClient` so a single WebSocket\nconnection covers both subscribe and publish, matching the v0.6 wire\nextension that landed in #87–#90. The HTTP `POST /events` path is\nunchanged; this is the WS-side surface for clients that already keep\na connection open for subscribe (chat send, presence heartbeat,\ncollab edits — the use cases that don't fit a long-lived server-to-\nserver bearer).\n\n## Surface\n\n```ts\nawait client.publish(\"chat_messages\", \"room-42\", {\n  from: \"alice\",\n  text: \"hello\",\n});\n```\n\nOverloads: `publish(stream, payload)` and `publish(stream, key, payload)`.\n\nAck-by-absence: the server does not send a success frame. The promise\nresolves once the settle window (`publishSettleMs`, default 250 ms)\nelapses without an error frame matching the publish's id. Within that\nwindow the SDK matches incoming `error` frames by id and rejects the\nmatching promise with a `ProtocolError`. `onError` still fires for\nparity with subscribe — the awaitable rejection is the convenience\nchannel for inline callers; observers stay observable.\n\n## Pending-publish bookkeeping\n\nA `Map<PublishId, Deferred<void>>` holds in-flight publishes.\n\n- Server error frame with a matching id → reject + delete + onError.\n- Settle timer fires first → resolve + delete.\n- Connection closes (clean or dirty) → reject all with\n  `ConnectionClosedError`, then the existing close/reconnect flow runs.\n\nPublish ids are `pub-N` so the routing in `onMessage` can distinguish\nthem from subscribe-side `sub-N` ids when both kinds of error are in\nflight on the same connection.\n\n## Fix: coalesce concurrent connects from `idle`\n\nWhile building the multi-concurrent-publish test, I tripped a latent\nbug in `ensureReady()`: the state transition to `\"connecting\"` and\nthe `readyDeferred` setup both happened *after* `await getToken()`,\nso two concurrent first-time `ensureReady()` callers each saw `idle`\nand each kicked off its own `connect()` — racing WebSockets and\ndropping frames. Subscribe never tripped this because it just sets\nlocal state and waits for replay; publish has to actually `send()`\nafter connect.\n\nFix: in `connect()`, set `state = \"connecting\"` and create the\n`readyDeferred` synchronously before awaiting `getToken()`. Existing\ntests stay green.\n\n## Wire types\n\n`PublishFrame` joins the `ClientFrame` union; `ErrorCode` gains\n`unauthorized_publish` and `publish_payload_too_large` to match the\nserver's new codes. Both new types are re-exported from\n`@alternet/wss-mux-client`.\n\n## Tests\n\n`tests/publish.test.mjs` — 7 new tests against the mock WS server:\n\n- publish frame shape: id/stream/key/payload, key-omitted variant\n- server error frame rejects the awaited `publish()` with ProtocolError\n- multiple concurrent publishes settle independently (one rejects, two\n  resolve)\n- connection drop while pending → `ConnectionClosedError`\n- publish on a closed client → `ClientUsageError`\n- error frame for an unknown id still surfaces via `onError`\n\nFull TS suite: 19 pass, 1 e2e skip. `tsc --noEmit` clean.\n\n## Docs\n\n`README.md` and `examples/basic.ts` document the new method and the\n`publishSettleMs` option.",
+          "timestamp": "2026-05-29T16:58:12-06:00",
+          "tree_id": "7dae5da10a847215d2071064d79fbcf49f3e2b82",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/4aad55c91db2603621a3f3fc70c2ca509962844a"
+        },
+        "date": 1780096013038,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 257,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1616,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3665,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29039,
+            "range": "± 186",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 328,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2411,
+            "range": "± 36",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28456,
+            "range": "± 570",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 354225,
+            "range": "± 26355",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4504107,
+            "range": "± 321682",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 137,
+            "range": "± 572",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 132,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31981,
+            "range": "± 69",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 163,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 125,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 132,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 132,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 148,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 303,
+            "range": "± 19",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 334,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1934,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 24199,
+            "range": "± 740",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 74,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 401,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4104,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 43484,
+            "range": "± 144",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 665,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 374694,
+            "range": "± 1976",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7254,
+            "range": "± 43",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 134,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
