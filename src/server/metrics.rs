@@ -134,6 +134,9 @@ pub struct Metrics {
     pub manifest_reloads: Family<ReloadResultLabel, Counter>,
     pub subscriptions_revoked: Family<RevokeReasonLabel, Counter>,
     pub frames_rate_limited: Counter,
+    /// WS publish frames rejected by the per-source rate limit. No
+    /// source label — cardinality risk.
+    pub ws_publish_rate_limited: Counter,
     pub relay_sent: Counter,
     /// Relayed (peer-origin) events that matched no local subscription
     /// — the cross-instance-waste / stream-sparsity signal that gates
@@ -170,6 +173,7 @@ impl Default for Metrics {
         let manifest_reloads = Family::<ReloadResultLabel, Counter>::default();
         let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
         let frames_rate_limited = Counter::default();
+        let ws_publish_rate_limited = Counter::default();
         let relay_sent = Counter::default();
         let relay_events_unwanted = Counter::default();
         let relay_flushes = Counter::default();
@@ -226,6 +230,11 @@ impl Default for Metrics {
             "wss_mux_frames_rate_limited",
             "Inbound client frames rejected by the per-connection rate limit",
             frames_rate_limited.clone(),
+        );
+        registry.register(
+            "wss_mux_ws_publish_rate_limited",
+            "WS publish frames rejected by the per-source publish rate limit",
+            ws_publish_rate_limited.clone(),
         );
         registry.register(
             "wss_mux_relay_sent",
@@ -294,6 +303,7 @@ impl Default for Metrics {
             manifest_reloads,
             subscriptions_revoked,
             frames_rate_limited,
+            ws_publish_rate_limited,
             relay_sent,
             relay_events_unwanted,
             relay_flushes,

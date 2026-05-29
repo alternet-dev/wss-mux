@@ -11,6 +11,7 @@ mod max_payload;
 mod metrics;
 mod overflow;
 mod publish;
+mod publish_rate_limit;
 mod push_to_fanout;
 mod rate_limit;
 mod ready;

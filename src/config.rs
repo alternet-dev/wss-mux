@@ -17,6 +17,18 @@ pub const DEFAULT_ENVELOPE_KEY_PATH: &str = "key";
 pub const DEFAULT_ENVELOPE_PAYLOAD_PATH: &str = "payload";
 pub const DEFAULT_INBOUND_RATE: u32 = 50;
 pub const DEFAULT_INBOUND_BURST: u32 = 100;
+/// Per-source WS publish rate (frames/sec/source). `0` disables the
+/// per-source limit entirely (no `PerSourceRateLimiter` is constructed,
+/// no eviction task is spawned, byte-identical to behaviour pre-feature).
+pub const DEFAULT_WS_PUBLISH_RATE: u32 = 0;
+/// Per-source idle-bucket eviction TTL. The sweep runs at one tenth
+/// this cadence; entries whose last touch is older than the TTL are
+/// dropped to bound the per-source bucket map.
+pub const DEFAULT_WS_PUBLISH_IDLE_TTL_SECS: u64 = 300;
+/// When `false`, a token with an empty `sub` falls back to a
+/// `conn:<id>` source key (per-connection limit instead of per-user).
+/// When `true`, such a token is refused with `unauthorized_publish`.
+pub const DEFAULT_WS_PUBLISH_REQUIRE_SUB: bool = false;
 pub const DEFAULT_RELAY_COALESCE_MS: u64 = 0;
 pub const DEFAULT_RELAY_COALESCE_MAX_EVENTS: usize = 1024;
 pub const DEFAULT_RELAY_QUEUE_DEPTH: usize = 1024;
@@ -88,6 +100,24 @@ pub struct Config {
     /// Token-bucket capacity — the largest instantaneous burst allowed
     /// before the steady rate applies.
     pub inbound_burst: u32,
+    /// Per-source WS publish rate limit (frames/sec/source). `0`
+    /// disables the per-source publish limit entirely. Source is the
+    /// connection's JWT `sub` claim — with a `conn:<id>` fallback when
+    /// `sub` is empty, unless `ws_publish_require_sub` rejects that
+    /// case outright.
+    pub ws_publish_rate_per_sec: u32,
+    /// Token-bucket capacity for the per-source WS publish limiter.
+    /// `0` ⇒ defaults to `2 * ws_publish_rate_per_sec` (per env-parse).
+    pub ws_publish_burst: u32,
+    /// When `true`, a connection whose token carries no `sub` (or an
+    /// empty `sub`) is refused at publish time with `unauthorized_publish`.
+    /// When `false` (default), such a connection falls back to a
+    /// per-connection source key (`conn:<id>`).
+    pub ws_publish_require_sub: bool,
+    /// Idle-bucket eviction TTL for the per-source WS publish limiter.
+    /// A bucket whose `last_seen` is older than this is dropped; the
+    /// sweep runs at one-tenth this cadence on a tokio interval task.
+    pub ws_publish_idle_ttl: Duration,
     /// Relay coalescing flush window (ms). `0` (default) disables
     /// coalescing entirely → relay is spawned per producer push,
     /// byte-identical to pre-v0.5. `>0` batches relayed events.
@@ -198,6 +228,11 @@ pub enum ConfigError {
     },
     #[error("invalid WSS_MUX_PEERS: {0}")]
     InvalidPeers(#[source] peers::PeerUrlError),
+    #[error(
+        "invalid value for {var}: `{value}` (expected one of: \
+         true/false, yes/no, on/off, 1/0)"
+    )]
+    InvalidBool { var: &'static str, value: String },
 }
 
 impl Config {
@@ -227,6 +262,10 @@ impl Config {
             envelope_payload_path: DEFAULT_ENVELOPE_PAYLOAD_PATH.to_string(),
             inbound_rate_per_sec: DEFAULT_INBOUND_RATE,
             inbound_burst: DEFAULT_INBOUND_BURST,
+            ws_publish_rate_per_sec: DEFAULT_WS_PUBLISH_RATE,
+            ws_publish_burst: 0,
+            ws_publish_require_sub: DEFAULT_WS_PUBLISH_REQUIRE_SUB,
+            ws_publish_idle_ttl: Duration::from_secs(DEFAULT_WS_PUBLISH_IDLE_TTL_SECS),
             relay_coalesce_ms: DEFAULT_RELAY_COALESCE_MS,
             relay_coalesce_max_events: DEFAULT_RELAY_COALESCE_MAX_EVENTS,
             relay_queue_depth: DEFAULT_RELAY_QUEUE_DEPTH,
@@ -308,9 +347,6 @@ impl Config {
                 None => Ok(default),
             }
         };
-        let inbound_rate_per_sec = parse_u32("WSS_MUX_INBOUND_RATE", DEFAULT_INBOUND_RATE)?;
-        let inbound_burst = parse_u32("WSS_MUX_INBOUND_BURST", DEFAULT_INBOUND_BURST)?;
-
         let parse_u64 = |var: &'static str, default: u64| -> Result<u64, ConfigError> {
             match get(var) {
                 Some(v) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
@@ -321,6 +357,48 @@ impl Config {
                 None => Ok(default),
             }
         };
+        let inbound_rate_per_sec = parse_u32("WSS_MUX_INBOUND_RATE", DEFAULT_INBOUND_RATE)?;
+        let inbound_burst = parse_u32("WSS_MUX_INBOUND_BURST", DEFAULT_INBOUND_BURST)?;
+        fn parse_bool<F>(get: &F, var: &'static str, default: bool) -> Result<bool, ConfigError>
+        where
+            F: Fn(&str) -> Option<String>,
+        {
+            match get(var) {
+                Some(v) => match v.trim().to_ascii_lowercase().as_str() {
+                    "true" | "1" | "yes" | "on" => Ok(true),
+                    "false" | "0" | "no" | "off" => Ok(false),
+                    _ => Err(ConfigError::InvalidBool {
+                        var,
+                        value: v.clone(),
+                    }),
+                },
+                None => Ok(default),
+            }
+        }
+
+        let ws_publish_rate_per_sec =
+            parse_u32("WSS_MUX_WS_PUBLISH_RATE", DEFAULT_WS_PUBLISH_RATE)?;
+        // Burst defaults to 2x the steady rate when set but unconfigured,
+        // matching the rest of the codebase's TokenBucket sizing.
+        let ws_publish_burst = match (get("WSS_MUX_WS_PUBLISH_BURST"), ws_publish_rate_per_sec) {
+            (Some(v), _) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_WS_PUBLISH_BURST",
+                value: v.clone(),
+                source,
+            })?,
+            (None, 0) => 0,
+            (None, rate) => rate.saturating_mul(2),
+        };
+        let ws_publish_require_sub = parse_bool(
+            &get,
+            "WSS_MUX_WS_PUBLISH_REQUIRE_SUB",
+            DEFAULT_WS_PUBLISH_REQUIRE_SUB,
+        )?;
+        let ws_publish_idle_ttl = Duration::from_secs(parse_u64(
+            "WSS_MUX_WS_PUBLISH_IDLE_TTL_SECS",
+            DEFAULT_WS_PUBLISH_IDLE_TTL_SECS,
+        )?);
+
         let non_blank = |v: Option<String>| -> Option<String> {
             v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
         };
@@ -414,6 +492,10 @@ impl Config {
             envelope_payload_path,
             inbound_rate_per_sec,
             inbound_burst,
+            ws_publish_rate_per_sec,
+            ws_publish_burst,
+            ws_publish_require_sub,
+            ws_publish_idle_ttl,
             relay_coalesce_ms,
             relay_coalesce_max_events,
             relay_queue_depth,
@@ -488,6 +570,74 @@ mod tests {
         let cfg = Config::from_getter(env(&pairs)).expect("config");
         assert_eq!(cfg.inbound_rate_per_sec, 0);
         assert_eq!(cfg.inbound_burst, 5);
+    }
+
+    #[test]
+    fn ws_publish_rate_defaults_to_disabled() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert_eq!(cfg.ws_publish_rate_per_sec, 0);
+        assert_eq!(cfg.ws_publish_burst, 0);
+        assert!(!cfg.ws_publish_require_sub);
+        assert_eq!(
+            cfg.ws_publish_idle_ttl,
+            Duration::from_secs(DEFAULT_WS_PUBLISH_IDLE_TTL_SECS)
+        );
+    }
+
+    #[test]
+    fn ws_publish_burst_defaults_to_2x_rate_when_unset() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_WS_PUBLISH_RATE", "10"));
+        // No explicit burst — default should be 2 * rate.
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.ws_publish_rate_per_sec, 10);
+        assert_eq!(cfg.ws_publish_burst, 20);
+    }
+
+    #[test]
+    fn ws_publish_explicit_burst_overrides_default() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_WS_PUBLISH_RATE", "10"));
+        pairs.push(("WSS_MUX_WS_PUBLISH_BURST", "100"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.ws_publish_rate_per_sec, 10);
+        assert_eq!(cfg.ws_publish_burst, 100);
+    }
+
+    #[test]
+    fn ws_publish_require_sub_parses_common_truthy_values() {
+        for v in ["true", "TRUE", "1", "yes", "on", " true "] {
+            let mut pairs = minimal();
+            pairs.push(("WSS_MUX_WS_PUBLISH_REQUIRE_SUB", v));
+            let cfg = Config::from_getter(env(&pairs)).expect("config");
+            assert!(cfg.ws_publish_require_sub, "value `{v}` should parse true");
+        }
+        for v in ["false", "FALSE", "0", "no", "off"] {
+            let mut pairs = minimal();
+            pairs.push(("WSS_MUX_WS_PUBLISH_REQUIRE_SUB", v));
+            let cfg = Config::from_getter(env(&pairs)).expect("config");
+            assert!(
+                !cfg.ws_publish_require_sub,
+                "value `{v}` should parse false"
+            );
+        }
+    }
+
+    #[test]
+    fn ws_publish_require_sub_rejects_garbage() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_WS_PUBLISH_REQUIRE_SUB", "maybe"));
+        let err = Config::from_getter(env(&pairs)).expect_err("error");
+        assert!(matches!(err, ConfigError::InvalidBool { var, .. }
+            if var == "WSS_MUX_WS_PUBLISH_REQUIRE_SUB"));
+    }
+
+    #[test]
+    fn ws_publish_idle_ttl_override() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_WS_PUBLISH_IDLE_TTL_SECS", "60"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.ws_publish_idle_ttl, Duration::from_secs(60));
     }
 
     #[test]
