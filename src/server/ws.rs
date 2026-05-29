@@ -271,6 +271,12 @@ async fn reader_loop(
     codec: Codec,
 ) {
     let mut principals: Option<Vec<String>> = None;
+    // JWT `sub` captured at auth time. Used by the WS publish handler
+    // to key the per-source rate limiter — two WS sessions with the
+    // same `sub` share one budget. `None` means "haven't authed yet";
+    // an empty string here means "authed, but the token carried no
+    // `sub`" (some IdPs leave it blank).
+    let mut auth_sub: Option<String> = None;
     // sub_id -> (stream, key, the effective cap its channel was built
     // with — tracked so a SIGHUP queue_depth change can recreate it).
     let mut subs: HashMap<String, (String, Option<String>, usize)> = HashMap::new();
@@ -405,6 +411,7 @@ async fn reader_loop(
                 match auth_result {
                     Ok(claims) => {
                         tracing::debug!(conn_id, sub = %claims.sub, "authenticated");
+                        auth_sub = Some(claims.sub);
                         principals = Some(claims.principals);
                     }
                     Err(AuthError::Expired) => {
@@ -512,6 +519,33 @@ async fn reader_loop(
                     if size > cap {
                         let _ = control_tx
                             .try_send(ProtocolError::PublishPayloadTooLarge { id }.to_outbound());
+                        continue;
+                    }
+                }
+                // Per-source rate limit. Only consulted when configured
+                // (`ws_publish_limiter()` is `Some` iff
+                // `ws_publish_rate_per_sec > 0`). Source key resolution:
+                //
+                //   - JWT `sub` non-empty                            ⇒ `sub:<sub>`
+                //   - JWT `sub` empty AND require_sub == false       ⇒ `conn:<id>`
+                //   - JWT `sub` empty AND require_sub == true        ⇒ unauthorized_publish
+                //
+                // Two WS sessions with the same `sub` share one bucket
+                // (the pool's keying contract).
+                if let Some(limiter) = state.ws_publish_limiter() {
+                    let source = match auth_sub.as_deref() {
+                        Some(s) if !s.is_empty() => format!("sub:{s}"),
+                        _ if cfg.ws_publish_require_sub => {
+                            let _ = control_tx
+                                .try_send(ProtocolError::UnauthorizedPublish { id }.to_outbound());
+                            continue;
+                        }
+                        _ => format!("conn:{conn_id}"),
+                    };
+                    if !limiter.try_take(&source, Instant::now()) {
+                        state.metrics().ws_publish_rate_limited.inc();
+                        let _ = control_tx
+                            .try_send(ProtocolError::RateLimited { id: Some(id) }.to_outbound());
                         continue;
                     }
                 }

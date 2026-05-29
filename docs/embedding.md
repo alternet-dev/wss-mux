@@ -286,6 +286,35 @@ Publish-time behavior:
 All are keep-open errors — a rejected publish does not close the
 connection.
 
+### Per-source publish rate limit
+
+A token-bucket rate limit can be applied to WS publish frames,
+keyed per source (so two WS sessions from the same user share one
+budget rather than each getting their own). Configured via env vars,
+inert when unset:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_WS_PUBLISH_RATE` | `0` | Refill rate per source (frames/sec). `0` disables the feature — no limiter is constructed, no idle sweep runs. |
+| `WSS_MUX_WS_PUBLISH_BURST` | `2 × RATE` | Token-bucket capacity per source. Defaults to twice the rate when rate is set. |
+| `WSS_MUX_WS_PUBLISH_REQUIRE_SUB` | `false` | When `true`, a token whose `sub` is empty is refused at publish time with `unauthorized_publish`. When `false`, such a connection falls back to a per-connection `conn:<id>` bucket. |
+| `WSS_MUX_WS_PUBLISH_IDLE_TTL_SECS` | `300` | A source's bucket is dropped after this long without activity. The sweep runs at one-tenth this cadence. |
+
+Source identification, in order:
+
+1. **JWT `sub` non-empty** ⇒ source key is `sub:<sub>`. Two WS sessions
+   with the same `sub` (e.g. one user across two devices) share one
+   bucket — the rate limit is per-user, not per-connection.
+2. **JWT `sub` empty AND `require_sub=false`** ⇒ source key is
+   `conn:<id>`, scoped to that one WS session. Coarser but the publish
+   proceeds.
+3. **JWT `sub` empty AND `require_sub=true`** ⇒ the publish is refused
+   with `unauthorized_publish` (keep-open).
+
+The limiter does **not** apply to HTTP `POST /events` — that path
+keeps using the shared `WSS_MUX_PUSH_AUTH_TOKEN` and has no
+per-source notion (yet). Metric: `wss_mux_ws_publish_rate_limited`.
+
 ### Per-stream payload cap
 
 A stream may declare an optional `max_payload_bytes`. A push whose

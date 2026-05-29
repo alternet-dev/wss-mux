@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
+use crate::ratelimit::PerSourceRateLimiter;
 use crate::registry::Registry;
 use crate::server::relay::RelayBatch;
 
@@ -74,6 +75,11 @@ struct Inner {
     relay_tx: Option<tokio::sync::mpsc::Sender<RelayBatch>>,
     // Receiver, taken once by the flush-task spawner at startup.
     relay_rx: Mutex<Option<tokio::sync::mpsc::Receiver<RelayBatch>>>,
+    // Per-source WS publish rate limiter. `Some` only when
+    // `Config::ws_publish_rate_per_sec > 0`. `None` ⇒ no per-source
+    // publish limiting (byte-identical pre-feature behaviour). The
+    // idle-eviction sweep is spawned at startup when this is `Some`.
+    ws_publish_limiter: Option<Arc<PerSourceRateLimiter>>,
 }
 
 impl AppState {
@@ -102,6 +108,17 @@ impl AppState {
         } else {
             (None, Mutex::new(None))
         };
+        // The per-source publish limiter is built only when the feature
+        // is configured. `rate == 0` ⇒ disabled and inert — no map, no
+        // eviction task. The eviction task is spawned by `main.rs` when
+        // this is `Some`, on a cadence of one-tenth `idle_ttl`.
+        let ws_publish_limiter = (config.ws_publish_rate_per_sec > 0).then(|| {
+            Arc::new(PerSourceRateLimiter::new(
+                config.ws_publish_burst,
+                config.ws_publish_rate_per_sec,
+                config.ws_publish_idle_ttl,
+            ))
+        });
         Ok(Self {
             inner: Arc::new(Inner {
                 config,
@@ -118,6 +135,7 @@ impl AppState {
                 metrics: Metrics::default(),
                 relay_tx,
                 relay_rx,
+                ws_publish_limiter,
             }),
         })
     }
@@ -134,6 +152,14 @@ impl AppState {
 
     pub fn config(&self) -> &Config {
         &self.inner.config
+    }
+
+    /// Per-source WS publish rate limiter, `Some` only when the feature
+    /// is configured (`Config::ws_publish_rate_per_sec > 0`). Held in an
+    /// `Arc` so the publish handler can hand the same instance to the
+    /// idle-eviction task at startup.
+    pub fn ws_publish_limiter(&self) -> Option<&Arc<PerSourceRateLimiter>> {
+        self.inner.ws_publish_limiter.as_ref()
     }
 
     /// Current manifest snapshot. The returned `Arc` is independent of any

@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
     spawn_sighup_reloader(state.clone());
     spawn_peer_refresher(state.clone());
     spawn_oidc_jwks_refresher(state.clone());
+    spawn_ws_publish_idle_sweeper(state.clone());
     wss_mux::server::relay::spawn_relay_flusher(state.clone());
 
     let listener = TcpListener::bind(state.config().listen_addr).await?;
@@ -55,6 +56,35 @@ fn spawn_peer_refresher(state: AppState) {
                 return; // fixed fleet — no polling
             }
             tokio::time::sleep(peer_cfg.dns_refresh).await;
+        }
+    });
+}
+
+/// Periodically drop idle per-source publish buckets so the keyed
+/// limiter map can't grow unboundedly with one-off sources. Inert
+/// (task not spawned) when the per-source WS publish limiter is
+/// disabled. Sweep cadence is one tenth of the configured idle TTL —
+/// frequent enough to keep evictions even under a steady churn, rare
+/// enough that the sweep cost is amortized vs every publish.
+fn spawn_ws_publish_idle_sweeper(state: AppState) {
+    let Some(limiter) = state.ws_publish_limiter().cloned() else {
+        return;
+    };
+    let ttl = state.config().ws_publish_idle_ttl;
+    let cadence = (ttl / 10).max(std::time::Duration::from_secs(1));
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(cadence);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            let evicted = limiter.sweep_idle(std::time::Instant::now());
+            if evicted > 0 {
+                tracing::debug!(
+                    evicted,
+                    active = limiter.active_sources(),
+                    "ws-publish per-source sweep"
+                );
+            }
         }
     });
 }
