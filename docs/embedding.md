@@ -286,6 +286,58 @@ Publish-time behavior:
 All are keep-open errors — a rejected publish does not close the
 connection.
 
+### Reading events over HTTP (SSE)
+
+For consumers that don't want a long-lived WebSocket — a backend
+service, a debug tool, a sidecar — `wss-mux` exposes the same event
+stream as a Server-Sent Events response:
+
+```bash
+curl -N \
+  -H "Authorization: Bearer $READ_TOKEN" \
+  http://localhost:8080/events/chat_messages
+```
+
+The path picks the stream (`/events/:stream`); an optional `?key=`
+query parameter narrows to one key (same semantics as the `subscribe`
+frame). The response is `Content-Type: text/event-stream` with one
+event per `data:` line:
+
+```
+data: {"type":"event","id":"","stream":"chat_messages","key":"room-42","payload":{"text":"hi"}}
+
+data: {"type":"event","id":"","stream":"chat_messages","key":"room-42","payload":{"text":"yo"}}
+```
+
+The `id` field is intentionally empty for SSE consumers — unlike WS
+subscribe, there is no client-supplied subscription id (one stream-key
+tuple per response).
+
+**Auth.** Two paths are supported simultaneously; operators expose
+whichever fits the deployment, or both:
+
+| Path | Configured by | When admitted |
+|---|---|---|
+| Shared bearer | `WSS_MUX_READ_AUTH_TOKEN` | `Authorization: Bearer <that-token>` — full read across streams, no audience check |
+| JWT | Existing handshake / OIDC validators | The token's principals intersect the stream's `subscribe` audience — identical posture to WS subscribe |
+
+The server tries the shared bearer first (cheap constant-time compare)
+and falls back to JWT validation. With neither configured the endpoint
+returns 401 on every request. The shared-bearer path is the natural
+fit for service-to-service consumers (e.g. a separate `presence_svc`
+subscribing to a `presence` stream); the JWT path is for user-context
+reads like an admin dashboard.
+
+**No replay.** A reconnecting consumer picks up new events from the
+reconnect point forward. `Last-Event-ID` is not honored. Use cases
+that need a replay buffer should track an event sequence in the
+payload and recover state through their own application logic.
+
+**Backpressure.** Per-consumer queue depth uses the same
+`WSS_MUX_QUEUE_DEPTH` knob as WS subscribers. On overflow, the SSE
+stream emits a final `event: error\ndata: overflow\n\n` and ends —
+reconnect to pick up from the new point.
+
 ### Per-source publish rate limit
 
 A token-bucket rate limit can be applied to WS publish frames,
