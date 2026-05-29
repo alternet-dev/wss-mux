@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780096013512,
+  "lastUpdate": 1780098946362,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -5849,6 +5849,240 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 134,
             "range": "± 1",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c007f53da008acf368f74513ad28473dac8046c9",
+          "message": "feat(client-rust): add publish() (#94)\n\nLands `WssMuxClient::publish(stream, key, payload)` so a single\nWebSocket covers both subscribe and publish, symmetric with the TS\nSDK's `client.publish()` (PR #92).\n\n## Surface\n\n```rust\nclient\n    .publish(\"chat_messages\", Some(\"room-42\"), json!({\"text\": \"hi\"}))\n    .await?;\n```\n\nAck-by-absence: the returned future resolves once the configured\npublish settle window elapses without a matching error frame. Within\nthe window an `error` frame whose `id` matches the publish rejects\nwith `WssMuxError::Protocol { code, .. }`. Connection drops reject\nwith `WssMuxError::ConnectionClosed`.\n\n## Internals\n\n- A `pending_pubs: HashMap<PublishId, oneshot::Sender<Result>>` lives\n  on the drive task. New publishes write the frame, insert into the\n  map, and push a settle timer onto a per-connection\n  `FuturesUnordered`.\n- The drive's select loop gains a settle arm. When a timer fires, the\n  publish id is looked up; if the entry is still pending the awaiter\n  resolves. Error frames matching a pending publish id take priority\n  over the settle timer (the error path removes the entry, so when\n  the timer eventually fires it finds nothing and is a no-op).\n- On connection close (clean or dirty) the drive drains\n  `pending_pubs` and rejects each with the close reason. That\n  prevents a false-positive `Ok(())` from a stale settle timer after\n  the WS is gone.\n\n## Builder\n\nNew `.publish_settle(Duration)` setter. Defaults to `250 ms` —\nmatches the TS SDK's `publishSettleMs` default and comfortably above\ntypical wide-area RTT. Tests use `25 ms` to keep the suite fast.\n\n## Tests\n\n`tests/publish.rs` — 7 integration tests against a mock WS server:\n\n- publish sends a `publish` frame with id/stream/key/payload and resolves\n- publish without key omits the field\n- publish rejects with Protocol error on matching server error frame\n- multiple concurrent publishes settle independently\n- publish after `close()` returns `WssMuxError::Closed`\n- error frame for unknown publish id is a no-op (no global error hook\n  in the Rust SDK; orphans are dropped, connection stays up)\n- publish rejects with ConnectionClosed when the server drops the\n  connection while a publish is pending\n\nSuite total: 21 pass (5 unit + 8 subscribe + 7 publish + 1 doctest).\n`cargo clippy --all-targets -- -D warnings`, `cargo fmt --all --\n--check` clean.\n\n## Docs\n\n`README.md` adds a `client.publish` section and a publish-settle row\nunder builder options. `examples/basic.rs` shows the publish call\nalongside subscribe.",
+          "timestamp": "2026-05-29T17:47:06-06:00",
+          "tree_id": "e5b534bebb12bc87c3c37eb59a8fb2d4db71bda5",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/c007f53da008acf368f74513ad28473dac8046c9"
+        },
+        "date": 1780098945527,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 298,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1903,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3998,
+            "range": "± 14",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 33262,
+            "range": "± 193",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 327,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2415,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28556,
+            "range": "± 1774",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 387221,
+            "range": "± 42981",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4340197,
+            "range": "± 256515",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 158,
+            "range": "± 445",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 138,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33608,
+            "range": "± 84",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 166,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 112,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 128,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 130,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 147,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 329,
+            "range": "± 79",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 356,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1912,
+            "range": "± 20",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 21087,
+            "range": "± 219",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 75,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 79,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 377,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 116,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2899,
+            "range": "± 26",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 147,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21549,
+            "range": "± 166",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 381801,
+            "range": "± 4834",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6324,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
