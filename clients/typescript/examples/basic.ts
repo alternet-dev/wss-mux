@@ -33,6 +33,21 @@ async function main() {
     console.log("event:", event.payload);
   });
 
+  // Publish over the same WebSocket. The connection's principals must
+  // intersect the server's `publish` audience for `chat_messages`.
+  try {
+    await client.publish("chat_messages", "room-42", {
+      from: "alice",
+      text: "hello",
+    });
+  } catch (err) {
+    if (err instanceof ProtocolError) {
+      console.warn("publish rejected:", err.code, err.message);
+    } else {
+      throw err;
+    }
+  }
+
   // Later: unsubscribe.
   // await client.unsubscribe(sid);
 

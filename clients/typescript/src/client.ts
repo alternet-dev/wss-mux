@@ -21,6 +21,8 @@ import {
 import type {
   AuthFrame,
   EventFrame,
+  PublishFrame,
+  PublishId,
   ServerFrame,
   SubscribeFrame,
   SubscriptionId,
@@ -73,6 +75,13 @@ export interface ClientOptions {
   onError?: ErrorCallback;
   /** Called on connection state transitions. */
   onStateChange?: StateCallback;
+  /**
+   * How long a `publish()` call waits for a possible error frame before
+   * resolving. The server acks publishes by absence — within a few RTTs
+   * either an error arrives (reject) or the publish is accepted. Default
+   * 250 ms, comfortably above typical wide-area RTT.
+   */
+  publishSettleMs?: number;
 }
 
 const DEFAULT_RECONNECT: Required<ReconnectOptions> = {
@@ -107,6 +116,14 @@ export class WssMuxClient {
   private readonly subscriptions: Map<SubscriptionId, ActiveSubscription> =
     new Map();
   private nextSubCounter = 1;
+
+  /**
+   * In-flight publishes awaiting either an error frame or the settle
+   * timeout. Keyed by the client-chosen publish id; entries are removed
+   * by whichever fires first.
+   */
+  private readonly pendingPublishes: Map<PublishId, Deferred<void>> = new Map();
+  private nextPublishCounter = 1;
 
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -195,6 +212,54 @@ export class WssMuxClient {
     return id;
   }
 
+  publish(stream: string, payload: unknown): Promise<void>;
+  publish(
+    stream: string,
+    key: string | undefined,
+    payload: unknown,
+  ): Promise<void>;
+  async publish(
+    stream: string,
+    keyOrPayload: string | undefined | unknown,
+    maybePayload?: unknown,
+  ): Promise<void> {
+    if (this.state === "closing" || this.state === "closed") {
+      throw new ClientUsageError("Client is closed");
+    }
+
+    let key: string | undefined;
+    let payload: unknown;
+    if (arguments.length <= 2) {
+      key = undefined;
+      payload = keyOrPayload;
+    } else {
+      key = keyOrPayload as string | undefined;
+      payload = maybePayload;
+    }
+
+    await this.ensureReady();
+
+    const id = this.nextPublishCid();
+    const def = deferred<void>();
+    this.pendingPublishes.set(id, def);
+
+    const settleMs = this.opts.publishSettleMs ?? 250;
+    const timer = setTimeout(() => {
+      // Only resolve if no error has claimed this id in the meantime.
+      if (this.pendingPublishes.delete(id)) {
+        def.resolve();
+      }
+    }, settleMs);
+    // Some Node WebSocket impls keep the event loop alive via setTimeout.
+    // unref() is a no-op in browsers (where this object isn't returned).
+    const t = timer as { unref?: () => void };
+    t.unref?.();
+
+    this.send(this.publishFrame(id, stream, key, payload));
+
+    return def.promise.finally(() => clearTimeout(timer));
+  }
+
   async unsubscribe(id: SubscriptionId): Promise<void> {
     if (!this.subscriptions.has(id)) return; // idempotent
     this.subscriptions.delete(id);
@@ -224,6 +289,9 @@ export class WssMuxClient {
       this.ws = null;
     }
     this.subscriptions.clear();
+    this.rejectPendingPublishes(
+      new ConnectionClosedError(1000, "client close"),
+    );
 
     if (this.readyDeferred) {
       this.readyDeferred.reject(new WssMuxError("client closed"));
@@ -240,12 +308,27 @@ export class WssMuxClient {
     return `sub-${this.nextSubCounter++}`;
   }
 
+  private nextPublishCid(): PublishId {
+    return `pub-${this.nextPublishCounter++}`;
+  }
+
   private subscribeFrame(
     id: SubscriptionId,
     stream: string,
     key: string | undefined,
   ): SubscribeFrame {
     const frame: SubscribeFrame = { type: "subscribe", id, stream };
+    if (key !== undefined) frame.key = key;
+    return frame;
+  }
+
+  private publishFrame(
+    id: PublishId,
+    stream: string,
+    key: string | undefined,
+    payload: unknown,
+  ): PublishFrame {
+    const frame: PublishFrame = { type: "publish", id, stream, payload };
     if (key !== undefined) frame.key = key;
     return frame;
   }
@@ -263,10 +346,11 @@ export class WssMuxClient {
   }
 
   private async connect(refreshToken: boolean): Promise<void> {
-    if (refreshToken || this.cachedToken === null) {
-      this.cachedToken = await this.opts.getToken();
-    }
-
+    // Establish the "connecting" gate synchronously so concurrent
+    // ensureReady() callers coalesce onto a single in-flight attempt.
+    // Without this, anything awaiting getToken() would leave the state
+    // at "idle" and additional callers would each kick off their own
+    // connect() — racing WebSockets and dropping frames.
     this.state = "connecting";
     this.emitState();
 
@@ -274,6 +358,10 @@ export class WssMuxClient {
       this.readyDeferred = deferred<void>();
     }
     const deferredAtConnect = this.readyDeferred;
+
+    if (refreshToken || this.cachedToken === null) {
+      this.cachedToken = await this.opts.getToken();
+    }
 
     let ws: WebSocket;
     try {
@@ -336,16 +424,32 @@ export class WssMuxClient {
     }
 
     if (frame.type === "error") {
-      if (frame.id && SUB_FATAL_CODES.has(frame.code)) {
-        this.subscriptions.delete(frame.id);
-      }
       const err = new ProtocolError(frame.code, frame.message, frame.id);
+      if (frame.id) {
+        // Pending publish? Match by id and reject the awaited promise.
+        // We also fire onError below so the consumer sees a uniform
+        // error channel regardless of whether they awaited the call.
+        const pending = this.pendingPublishes.get(frame.id);
+        if (pending) {
+          this.pendingPublishes.delete(frame.id);
+          pending.reject(err);
+        } else if (SUB_FATAL_CODES.has(frame.code)) {
+          this.subscriptions.delete(frame.id);
+        }
+      }
       this.opts.onError?.(err);
     }
   }
 
   private onClose(event: CloseEvent): void {
     this.ws = null;
+
+    // Pending publishes lose their server-side fate when the WS drops;
+    // the next connection won't see any error frame for them. Reject
+    // them now regardless of whether we'll reconnect.
+    this.rejectPendingPublishes(
+      new ConnectionClosedError(event.code, event.reason),
+    );
 
     if (this.state === "closing" || this.state === "closed") return;
 
@@ -404,10 +508,20 @@ export class WssMuxClient {
     }, delayMs);
   }
 
-  private send(frame: AuthFrame | SubscribeFrame | UnsubscribeFrame): void {
+  private send(
+    frame: AuthFrame | SubscribeFrame | UnsubscribeFrame | PublishFrame,
+  ): void {
     const ws = this.ws;
     if (!ws || ws.readyState !== ws.OPEN) return;
     ws.send(JSON.stringify(frame));
+  }
+
+  private rejectPendingPublishes(err: WssMuxError): void {
+    if (this.pendingPublishes.size === 0) return;
+    for (const def of this.pendingPublishes.values()) {
+      def.reject(err);
+    }
+    this.pendingPublishes.clear();
   }
 
   private emitState(): void {
