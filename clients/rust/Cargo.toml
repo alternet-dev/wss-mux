@@ -1,0 +1,32 @@
+[package]
+name = "wss-mux-client"
+version = "0.5.3"
+edition = "2021"
+rust-version = "1.75"
+description = "Rust client for the wss-mux WebSocket multiplexer"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alternet-dev/wss-mux"
+homepage = "https://github.com/alternet-dev/wss-mux/tree/trunk/clients/rust"
+documentation = "https://docs.rs/wss-mux-client"
+readme = "README.md"
+keywords = ["websocket", "wss-mux", "realtime", "multiplexer", "pubsub"]
+categories = ["network-programming", "web-programming::websocket"]
+
+[lib]
+name = "wss_mux_client"
+path = "src/lib.rs"
+
+[dependencies]
+# Runtime: rt-multi-thread is needed because the SDK spawns its reader/
+# writer drive task; the consumer's runtime flavor is up to them but
+# `rt` alone would force them onto current-thread.
+tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-tungstenite = "0.21"
