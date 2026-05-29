@@ -1,0 +1,62 @@
+name: Rust client CI
+
+on:
+  push:
+    branches: [trunk]
+    paths:
+      - "clients/rust/**"
+      - ".github/workflows/rust-client-ci.yml"
+  pull_request:
+    branches: [trunk]
+    paths:
+      - "clients/rust/**"
+      - ".github/workflows/rust-client-ci.yml"
+
+concurrency:
+  group: rust-client-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/rust
+      - run: cargo build --all-targets
+      - run: cargo test --all-targets
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/rust
+      - run: cargo clippy --all-targets -- -D warnings
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
