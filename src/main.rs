@@ -1,3 +1,6 @@
+use std::path::Path;
+use std::process::ExitCode;
+
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
 use wss_mux::config::Config;
@@ -5,8 +8,30 @@ use wss_mux::manifest::Manifest;
 use wss_mux::server::metrics::{ReloadResult, ReloadResultLabel};
 use wss_mux::server::{build_app, AppState};
 
+fn main() -> ExitCode {
+    // Subcommands run synchronously and exit; the async server runtime
+    // only spins up when no subcommand matched. Putting this dispatch
+    // ahead of `Config::from_env` means embedders running
+    // `wss-mux validate-manifest …` don't need to satisfy the server's
+    // env-var contract.
+    let argv: Vec<String> = std::env::args().collect();
+    if let Some(cmd) = argv.get(1).map(String::as_str) {
+        match cmd {
+            "validate-manifest" => {
+                return run_validate_manifest(&argv[2..]);
+            }
+            "--help" | "-h" | "help" => {
+                print_usage();
+                return ExitCode::SUCCESS;
+            }
+            _ => {} // fall through to server mode
+        }
+    }
+    server_main()
+}
+
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn server_main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -14,6 +39,52 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    match try_serve().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_usage() {
+    eprintln!("usage:");
+    eprintln!("  wss-mux                              run the server (configure via env vars)");
+    eprintln!(
+        "  wss-mux validate-manifest <path>     parse + validate a streams manifest; exit 0 if ok"
+    );
+}
+
+/// Parse + validate a manifest using upstream's own parser. Designed
+/// for CI pre-flight by embedders who codegen the manifest and want a
+/// drift-proof "does this still parse?" check.
+fn run_validate_manifest(args: &[String]) -> ExitCode {
+    let path = match args.first() {
+        Some(p) => Path::new(p),
+        None => {
+            eprintln!("usage: wss-mux validate-manifest <path>");
+            return ExitCode::from(2);
+        }
+    };
+    match Manifest::load(path) {
+        Ok(m) => {
+            let names: Vec<&str> = m.streams.iter().map(|s| s.name.as_str()).collect();
+            println!(
+                "ok: {} streams loaded ({})",
+                m.streams.len(),
+                names.join(", ")
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn try_serve() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let manifest = Manifest::load(&config.manifest_path)?;
     tracing::info!(streams = manifest.streams.len(), "manifest loaded");

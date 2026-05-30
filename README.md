@@ -171,6 +171,13 @@ All configuration is environment variables, read once at startup.
 
 Operational notes:
 
+- **`validate-manifest`** subcommand: `wss-mux validate-manifest <path>`
+  parses and validates a streams manifest without starting the server.
+  Exits 0 on success with a one-line summary, non-zero on failure with
+  the validation error. Intended for embedders' CI pre-flight when a
+  manifest is codegenned and you want the upstream parser to be the
+  source of truth.
+
 - **`SIGHUP`** reloads and re-validates the manifest without dropping
   connections; subscriptions invalidated by the new manifest get an
   `error` frame and are dropped, the connection stays open. A failed
