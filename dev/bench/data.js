@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780105498434,
+  "lastUpdate": 1780115817100,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -6317,6 +6317,240 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 135,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec62eb580268d0f38dc4ade198b31596f683a0c4",
+          "message": "feat(e2e): cross-SDK harness + Rust e2e + TS e2e expansion (#96)\n\nAdds a repo-level e2e harness that boots a real `wss-mux` binary,\nmints a JWT, and runs both SDK e2e suites against it. Cross-SDK wire\ncompatibility now has an end-to-end gate, not just per-SDK unit\ntests.\n\n## Harness\n\n`tests/e2e/`:\n\n- `manifest.yaml` — minimal three-stream manifest (`chat_messages`\n  for the happy path, `presence` for wildcard, `readonly` for\n  default-deny).\n- `mint_token.sh` — HS256-signed JWT minter using only openssl + bash\n  (no jq / python dependency).\n- `run.sh` — orchestration. Builds the release binary, picks a fixed\n  ephemeral port, boots the server with a per-run secret +\n  `WSS_MUX_HANDSHAKE_SIGNING_KEY` / `WSS_MUX_PUSH_AUTH_TOKEN` /\n  `WSS_MUX_READ_AUTH_TOKEN`, waits for `/health`, then runs each\n  SDK's gated e2e suite. Trap cleans up the server on any exit.\n- `README.md` — what's covered, env-var contract, requirements.\n\n```bash\ntests/e2e/run.sh         # rust + typescript\ntests/e2e/run.sh rust    # rust only\ntests/e2e/run.sh ts      # typescript only\n```\n\nLocal: ~5 s including server boot. CI: ~30 s on a cold runner.\n\n## Rust e2e (`clients/rust/tests/e2e.rs`)\n\n4 gated tests, skip if `WSS_MUX_E2E_URL` is unset so `cargo test` on\ntrunk doesn't try to dial a missing server:\n\n- connect + subscribe + WS publish own-event roundtrip\n- publish to readonly stream → `Protocol(unauthorized_publish)`\n- HTTP `POST /events` push observed by WS subscriber (cross-\n  transport)\n- unsubscribe stops event delivery\n\nThe HTTP-push helper hand-rolls a tiny tokio-based POST so the SDK\ncrate stays reqwest-free.\n\n## TS e2e (`clients/typescript/tests/e2e.test.mjs`)\n\nReplaces the single-subscribe scaffold with 4 gated tests\nsymmetric to the Rust suite, plus a cross-client publish→subscribe\ntest (one SDK instance publishes, another instance on the same\nserver observes).\n\n## CI (`.github/workflows/sdk-e2e.yml`)\n\nPath-gated to wire schema (`src/envelope.rs`, `src/manifest.rs`),\nserver dispatch (`src/server/**`), auth (`src/auth.rs`), either SDK\n(`clients/**`), the harness itself, or the workflow file. Other PRs\nskip the job — per-PR CI stays fast while wire-compat regressions\nare pinned whenever the surface moves.\n\n## Docs\n\n`tests/e2e/README.md` documents the harness end-to-end. Both SDK\nREADMEs gain a one-line pointer to it under Development.",
+          "timestamp": "2026-05-29T22:29:11-06:00",
+          "tree_id": "55a32026244353a1fba47cc5e6c20e56325325c1",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/ec62eb580268d0f38dc4ade198b31596f683a0c4"
+        },
+        "date": 1780115815805,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 135,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1010,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 2003,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 18603,
+            "range": "± 694",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 232,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 1911,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 23806,
+            "range": "± 999",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 271479,
+            "range": "± 22214",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3884130,
+            "range": "± 574108",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 100,
+            "range": "± 350",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 72,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 24919,
+            "range": "± 747",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 85,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 8,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 27,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 59,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 83,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 86,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 85,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 92,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 200,
+            "range": "± 3071",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 462,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1786,
+            "range": "± 52",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 16065,
+            "range": "± 192",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 42,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 42,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 273,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 50,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2178,
+            "range": "± 306",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 68,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 28926,
+            "range": "± 575",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 345,
+            "range": "± 53",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 297858,
+            "range": "± 7142",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 2892,
+            "range": "± 121",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 87,
+            "range": "± 5",
             "unit": "ns/iter"
           }
         ]
