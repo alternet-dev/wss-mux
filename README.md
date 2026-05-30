@@ -141,7 +141,8 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |
 | `WSS_MUX_OIDC_ISSUER` | — | OIDC issuer URL; enables OIDC token validation (mutually exclusive with the handshake keys) |
 | `WSS_MUX_OIDC_AUDIENCE` | — | required when OIDC is enabled: the `aud` tokens must carry |
-| `WSS_MUX_OIDC_JWKS_URL` | — | explicit JWKS endpoint; absent ⇒ discovered from the issuer |
+| `WSS_MUX_OIDC_DISCOVERY_URL` | — | discovery base; absent ⇒ uses `WSS_MUX_OIDC_ISSUER`. Lets the public iss diverge from the in-cluster endpoint (Keycloak BACKCHANNEL_DYNAMIC, etc.) |
+| `WSS_MUX_OIDC_JWKS_URL` | — | explicit JWKS endpoint; absent ⇒ discovered from the discovery base |
 | `WSS_MUX_OIDC_GROUPS_CLAIM` | `groups` | array claim mapped to principals |
 | `WSS_MUX_OIDC_PRINCIPAL_PREFIX` | — | prefix applied to each group value (e.g. `role:`) |
 | `WSS_MUX_OIDC_JWKS_REFRESH` | `300` | JWKS re-fetch interval (seconds) |
