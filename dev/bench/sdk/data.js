@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780117140122,
+  "lastUpdate": 1780117144496,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -191,6 +191,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 44057,
             "range": "± 2192",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "db7eada2577339c8f58d21ed6539cdceabb39738",
+          "message": "chore: bump version to 0.6.0 (#101)\n\nCuts v0.6.0, the WS-publish + SDK release. Three crates / packages\nbump in lockstep:\n\n- `wss-mux` (server) `0.5.3` → `0.6.0`\n- `wss-mux-client` (Rust SDK) `0.5.3` → `0.6.0` — first crates.io publish\n- `@alternet/wss-mux-client` (TS SDK) `0.5.3` → `0.6.0`\n\n## What ships in v0.6.0\n\nWire surface (server):\n\n- `publish` ClientFrame variant (#87, #88) — a WS client emits an\n  event over the connection it already holds open. Same downstream\n  dispatch as HTTP `POST /events`.\n- Per-stream `publish` audience in the manifest (#87) — default-deny,\n  parallel to the existing `subscribe` field. Field rename from\n  `audience` → `subscribe` is the wire-breaking part (pre-1.0\n  manifest schema bump).\n- `unauthorized_publish` + `publish_payload_too_large` error codes\n  (#88), keep-open.\n- `PerSourceRateLimiter` keyed by JWT `sub` (#89, #90) — per-source\n  publish budget, sweeper task, configurable via\n  `WSS_MUX_WS_PUBLISH_RATE` / `_BURST` / `_REQUIRE_SUB` /\n  `_IDLE_TTL_SECS`.\n- `GET /events/:stream` SSE read endpoint (#91) — the backend-\n  consumer story; auth supports shared-bearer\n  (`WSS_MUX_READ_AUTH_TOKEN`) and JWT.\n\nClient SDKs:\n\n- TypeScript SDK gains `client.publish()` (#92), `publishSettleMs`\n  builder option, `unauthorized_publish` / `publish_payload_too_large`\n  in the `ErrorCode` union.\n- Rust SDK (`clients/rust/`) lands as a new crate (#93, #94) —\n  subscribe + publish, reconnect + token-refresh + heartbeat\n  internal, typed errors. `connect_async`-based, minimal deps.\n- Cross-SDK e2e harness (#96) — single-shell entrypoint that boots\n  the server, mints a JWT, runs both SDKs' gated e2e suites; new\n  path-gated `sdk-e2e.yml` workflow.\n- Rust SDK criterion benches against an in-process server (#97):\n  publish_self_roundtrip, publish_throughput, subscribe_one.\n\nCI / release:\n\n- `cargo-publish` job in `release.yml` (#98) — idempotent via\n  crates.io HEAD check, validates Cargo.toml vs tag, uses\n  `CARGO_REGISTRY_TOKEN`. TP migration tracked separately in #99.\n\nDocs:\n\n- `docs/architecture.md` + `docs/embedding.md` swept for the new\n  surface (#100), including the presence_svc pattern.\n\n## Maintainer action items before the tag fires\n\n- `CARGO_REGISTRY_TOKEN` secret set (token scoped to\n  `wss-mux-client`, `publish-new` + `publish-update`).\n- crates.io has space for the `wss-mux-client` name (first publish\n  will claim it).",
+          "timestamp": "2026-05-29T22:58:09-06:00",
+          "tree_id": "957add102e32fd1ebea536699cceee102c0e7277",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/db7eada2577339c8f58d21ed6539cdceabb39738"
+        },
+        "date": 1780117144194,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1163666,
+            "range": "± 34867",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11408863,
+            "range": "± 190045",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 113162331,
+            "range": "± 1555627",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 35072,
+            "range": "± 2228",
             "unit": "ns/iter"
           }
         ]
