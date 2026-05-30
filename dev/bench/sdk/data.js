@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780126681843,
+  "lastUpdate": 1780127507301,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -383,6 +383,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 29017,
             "range": "± 1389",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4211a5be187d4c41110e4f1b186bb12a7a9d645c",
+          "message": "chore: bump version to 0.6.1 (#107)\n\nPatch release on top of 0.6.0. Three packages move in lockstep:\n\n- `wss-mux` (server) 0.6.0 → 0.6.1\n- `wss-mux-client` (Rust SDK) 0.6.0 → 0.6.1\n- `@alternet/wss-mux-client` (TS SDK) 0.6.0 → 0.6.1\n\n## What ships\n\n- OIDC: split discovery_url from issuer (#104) — new\n  `WSS_MUX_OIDC_DISCOVERY_URL` env var lets the public `iss` value\n  tokens carry diverge from the URL wss-mux fetches discovery from.\n  Resolves the Keycloak `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` pain point\n  where the only workaround was pinning `WSS_MUX_OIDC_JWKS_URL` and\n  giving up the rest of the discovery doc.\n- `wss-mux validate-manifest <path>` subcommand (#105) — parses +\n  validates a streams manifest using upstream's own parser. Exits 0\n  with a one-line summary, 1 on validation error, 2 on usage error.\n  No env vars required, no server runtime. For embedders' CI\n  pre-flight on codegen'd manifests.\n- TS SDK: getToken contract pinned in the README + a wire-level test\n  asserting the freshly-fetched token actually reaches the auth\n  frame on a 4401-driven reconnect (#106). No behavior change in\n  the SDK; characterization test locks the invariant against\n  regression.\n\nThe Rust SDK has no source changes; the version bump is the\nlockstep half. crates.io publishes a 0.6.1 with identical code to\n0.6.0 so the trio's versions stay aligned.\n\n## No wire-breaking changes\n\nPatch release — all wire surfaces (envelope, manifest schema, error\ncodes, close codes, subprotocol) are byte-identical to 0.6.0. A\n0.6.0 client speaks to a 0.6.1 server and vice versa, no changes.",
+          "timestamp": "2026-05-30T01:50:52-06:00",
+          "tree_id": "dc31810eff8881947a81cf1fdbe87e0b364401c6",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/4211a5be187d4c41110e4f1b186bb12a7a9d645c"
+        },
+        "date": 1780127507010,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1097136,
+            "range": "± 56290",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11049632,
+            "range": "± 197432",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 111445562,
+            "range": "± 2125180",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 42818,
+            "range": "± 1492",
             "unit": "ns/iter"
           }
         ]
