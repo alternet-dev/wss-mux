@@ -1,6 +1,6 @@
 [package]
 name = "wss-mux"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 rust-version = "1.75"
 description = "WebSocket multiplexer for server-driven event fanout"
