@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780116205351,
+  "lastUpdate": 1780117140122,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -143,6 +143,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 43485,
             "range": "± 1400",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ccb5f427f5f5ca007f1b65340a1cad2a5c825c47",
+          "message": "docs: v0.6 sweep — WS publish, SSE read, SDKs, presence_svc pattern (#100)\n\nBrings the three repo-level docs in line with the v0.6 wire surface\nthat landed across #87–#94 and #95.\n\n## architecture.md\n\n- Dispatch diagram now shows the SSE read endpoint (HTTP server) and\n  publish on the WS server, matching `build_app`'s route table.\n- New \"Unified dispatch\" callout: HTTP push, WS publish, WS subscribe,\n  and SSE read all share the dispatcher and registry — the four wire\n  surfaces differ only in framing.\n- HTTP server section gains a paragraph on `GET /events/:stream`\n  (auth matrix + dispatcher-side parity with WS subscribe).\n- WS server section now covers the `publish` frame: audience check,\n  per-stream payload cap, per-source rate limit, dispatch via the\n  same path as HTTP `POST /events`. Notes that publish rejections\n  are keep-open (same posture as `overflow`).\n\n## embedding.md\n\n- New \"Client SDKs\" section pointing to the TS and Rust SDKs under\n  `clients/` and noting they're wire-compatible.\n- New \"Building a presence service on top\" section — the canonical\n  end-to-end example the v0.6 design was shaped around. Shows the\n  manifest stanza, a browser-side heartbeat using the TS SDK, and an\n  HTTP SSE consumer pattern for a backend presence_svc. Closes with\n  the schematic of clients ↔ wss-mux ↔ presence_svc.\n\n## README.md\n\n- Quick start's Subscribe example switches from a raw WebSocket\n  snippet to the TS SDK quickstart — more representative of how\n  consumers actually integrate. Same example also demonstrates\n  `client.publish()` over the same connection.\n- Adds pointers to the Rust SDK and the SSE read endpoint for the\n  non-WS consumer story.\n\nNo changes to `docs/protocol.md` — wire surface for publish frames\nand `unauthorized_publish` / `publish_payload_too_large` was already\ndocumented when the frames landed.",
+          "timestamp": "2026-05-29T22:58:04-06:00",
+          "tree_id": "73f0fc3ad7213ae0210fc9cf6f278c6788b84fb2",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/ccb5f427f5f5ca007f1b65340a1cad2a5c825c47"
+        },
+        "date": 1780117139817,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1107369,
+            "range": "± 61055",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11041599,
+            "range": "± 388174",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 109940537,
+            "range": "± 2024611",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 44057,
+            "range": "± 2192",
             "unit": "ns/iter"
           }
         ]
