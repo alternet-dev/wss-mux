@@ -49,6 +49,32 @@ The `getToken` callback is called on the initial connect and whenever the
 server closes the connection with code `4401`. Other reconnects reuse the
 cached token.
 
+### `getToken` contract (in detail)
+
+The SDK invokes `getToken()` in exactly two situations:
+
+1. **Initial connection.** Once, before sending the first `auth` frame.
+2. **Reconnect after a close-code 4401.** When the server closes with
+   `4401` (`expired_token` / `unauthenticated`), the SDK re-invokes
+   `getToken()` before re-auth'ing, sends the **freshly returned value**
+   on the new connection, and replays subscriptions.
+
+The fresh value reaches the wire — the SDK does not cache the previous
+token across a 4401-driven reconnect. (Other reconnects, e.g. a transient
+1006 disconnect, *do* reuse the cached token to avoid hammering the
+token issuer on flapping connections.)
+
+This is the safety net the SDK provides for token rotation: the consumer
+keeps the latest token reachable from inside the callback — typically a
+React ref, an atom, a signal, or whatever your framework's "read the
+current value" primitive is — and `getToken` returns whatever is
+current at refresh time. The SDK calls it for you when it matters; you
+don't have to re-mount the client.
+
+Pre-emptive token refresh (refreshing before the server says 4401) is
+out of scope — it's an app-layer concern. The 4401-driven path above is
+the safety net for when that pre-emptive refresh missed.
+
 ## API
 
 ### `new WssMuxClient(options)`

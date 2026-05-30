@@ -109,6 +109,57 @@ test("4401 close triggers fresh getToken() call", async () => {
   await srv.close();
 });
 
+test("4401 reconnect sends the freshly-fetched token on the wire", async () => {
+  // The weaker existing test only checks `getToken` was called twice.
+  // That misses a class of regression where the SDK *fetches* the new
+  // token but then sends the old one (cache invalidation order bug,
+  // stale closure capture, etc.). Inspect the auth frame on the
+  // post-4401 connection and assert the wire value matches the latest
+  // getToken() return.
+  let connectionCount = 0;
+  const authFrames = []; // per-connection
+  const srv = await startServer((ws) => {
+    connectionCount += 1;
+    const idx = connectionCount - 1;
+    authFrames[idx] = null;
+    ws.on("message", (data) => {
+      const frame = JSON.parse(data.toString());
+      if (frame.type === "auth") authFrames[idx] = frame;
+    });
+    if (connectionCount === 1) {
+      // Close with 4401 after the auth frame lands.
+      ws.once("message", () => ws.close(CLOSE_UNAUTHENTICATED, "expired_token"));
+    }
+  });
+
+  // Token source rotates on every call so the wire value is
+  // distinguishable across connections.
+  let counter = 0;
+  const client = new WssMuxClient({
+    wssUrl: srv.url,
+    getToken: async () => {
+      counter += 1;
+      return `tok-${counter}`;
+    },
+    WebSocket: WsClient,
+    reconnect: { initialBackoffMs: 5, maxBackoffMs: 20 },
+  });
+
+  await client.subscribe("chat", () => {});
+  await new Promise((r) => setTimeout(r, 80));
+
+  assert.equal(connectionCount, 2, "reconnected after 4401");
+  assert.equal(authFrames[0]?.token, "tok-1", "first connection auth'd with initial token");
+  assert.equal(
+    authFrames[1]?.token,
+    "tok-2",
+    "post-4401 connection auth'd with the freshly-fetched token, not a stale cache",
+  );
+
+  await client.close();
+  await srv.close();
+});
+
 test("non-4401 reconnect does NOT call getToken again", async () => {
   let connectionCount = 0;
   const srv = await startServer((ws) => {
