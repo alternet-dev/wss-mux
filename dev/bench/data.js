@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780123835694,
+  "lastUpdate": 1780126845456,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -7486,6 +7486,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 109,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a34f57c765fade212775697a53532f3741ca3510",
+          "message": "feat(cli): wss-mux validate-manifest subcommand (#102) (#105)\n\nAdds `wss-mux validate-manifest <path>`: parses + validates a\nstreams manifest using upstream's own parser, then exits 0 with a\none-line summary or 1 with the validation error. No env vars\nrequired; no server runtime spun up.\n\n## Why\n\nEmbedders that codegen the streams manifest (e.g. application-\ntemplate's Python AST walker) need to drift-check the generated YAML\nagainst upstream's schema. Today they re-implement enough of\n`src/manifest.rs` to read the file, which means the v0.6 `audience`\n→ `subscribe` rename + new `publish` field broke them silently — and\nevery future schema evolution carries the same hazard.\n\nThis subcommand makes upstream's parser the source of truth: the\nembedder's CI pre-flight shells out instead of carrying its own copy\nof the schema.\n\n## Surface\n\n```\n$ wss-mux validate-manifest config/wss-mux/streams.yaml\nok: 2 streams loaded (notification_banner, suspension_status_card)\n$ echo $?\n0\n\n$ wss-mux validate-manifest broken.yaml\nerror: ...\n$ echo $?\n1\n\n$ wss-mux validate-manifest\nusage: wss-mux validate-manifest <path>\n$ echo $?\n2\n```\n\n## Dispatch\n\n`main()` now inspects `argv[1]` synchronously before any tokio\nruntime spin-up:\n\n- `validate-manifest` → run synchronously, exit.\n- `help` / `--help` / `-h` → print usage, exit 0.\n- anything else (or no arg) → fall through to `server_main()`, which\n  carries the existing async server behavior verbatim. The new\n  surface is **additive** — `wss-mux` with no args still starts the\n  server unchanged.\n\nThe dispatch lives ahead of `Config::from_env()`, so embedders don't\nneed to satisfy the server's env-var contract when they're just\nvalidating a file.\n\n## Tests\n\n`tests/integration/validate_manifest.rs` spawns the built binary via\n`env!(\"CARGO_BIN_EXE_wss-mux\")` and asserts:\n\n- valid YAML → exit 0, stdout includes the stream count + names\n- invalid YAML → non-zero exit, stderr mentions \"error\"\n- missing path → non-zero exit\n- missing positional arg → non-zero exit with a usage hint\n\nTiny in-test tempdir helper rather than a new dev-dep.\n\n## Out of scope\n\n- `--json` structured output. Marked \"maybe\" in #102; if an embedder\n  needs structured diagnostics we can add it as a follow-up. Today's\n  callers grep stdout / treat exit code as the signal.\n- Wire-protocol validation, audience-set validation against an\n  external IdP, etc. — separate concerns per the issue.\n\n## Docs\n\n`README.md` gains a one-paragraph note under the operational\nsection.",
+          "timestamp": "2026-05-30T01:32:04-06:00",
+          "tree_id": "a2bdd2bdc8955cbc1a90c4dbc2f49dd3c54c4dd8",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/a34f57c765fade212775697a53532f3741ca3510"
+        },
+        "date": 1780126844696,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 251,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1650,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3704,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 28895,
+            "range": "± 76",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 325,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2445,
+            "range": "± 59",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29157,
+            "range": "± 1723",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 366966,
+            "range": "± 23579",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5154928,
+            "range": "± 274398",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 139,
+            "range": "± 400",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 132,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 32020,
+            "range": "± 217",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 158,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 128,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 147,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 334,
+            "range": "± 129",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 333,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 2089,
+            "range": "± 38",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 23636,
+            "range": "± 384",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 73,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 349,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3829,
+            "range": "± 41",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21624,
+            "range": "± 289",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 663,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 374416,
+            "range": "± 4282",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6917,
+            "range": "± 62",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 135,
             "range": "± 0",
             "unit": "ns/iter"
           }
