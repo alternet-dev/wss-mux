@@ -4,10 +4,11 @@ A single binary built around a few small components.
 
 ```
          +-----------------+
-         |   HTTP server   |  POST /events
-         |                 |  POST /events/batch
-         +--------+--------+  GET  /health
-                  |           GET  /ready
+         |   HTTP server   |  POST /events           (push)
+         |                 |  POST /events/batch     (push)
+         |                 |  GET  /events/:stream   (SSE read)
+         +--------+--------+  GET  /health, /ready
+                  |
                   v
          +-----------------+
          |   Dispatcher    |  events -> matching subscriptions
@@ -16,14 +17,24 @@ A single binary built around a few small components.
                   v
          +-----------------+
          |    Registry     |  connections + subscriptions
-         +--------+--------+
+         +--------+--------+   (WS and SSE bindings)
                   ^
                   |
          +-----------------+
          |    WS server    |  /stream
+         |                 |  subscribe + publish + unsubscribe
          |                 |  per-connection task
          +-----------------+
 ```
+
+**Unified dispatch.** HTTP `POST /events`, WS `publish`, WS `subscribe`,
+and SSE `GET /events/:stream` all share the same dispatcher and the
+same registry. A WS-published event takes the same code path
+downstream as one pushed over HTTP; an SSE consumer registers a
+subscription binding indistinguishable from a WS subscriber's. The
+four wire surfaces differ only in framing — schema, audience
+matching, per-subscription queue, and overflow semantics are one
+implementation.
 
 ## Components
 
@@ -33,6 +44,17 @@ Accepts producer pushes on `POST /events` and the batched
 `POST /events/batch`. Bearer-token authenticated against a shared
 secret. Validates the event envelope, forwards to the dispatcher.
 Stateless.
+
+`GET /events/:stream` exposes the same event stream as a
+Server-Sent Events response — the consumer story for backends that
+don't want a long-lived WebSocket (a separate `presence_svc`, an
+admin dashboard, a sidecar). Auth supports a shared bearer
+(`WSS_MUX_READ_AUTH_TOKEN`, parallel to the producer token) or a
+JWT whose principals intersect the stream's `subscribe` audience
+(parallel to WS subscribe). Each SSE response registers a
+subscription binding in the registry exactly as a WS subscribe
+would; the dispatcher writes to it transparently. See
+`docs/embedding.md` for the wire shape and auth matrix.
 
 Also serves `/health` (200 if the process is alive) and `/ready`
 (200 once the manifest is loaded and the WS listener is up).
@@ -69,8 +91,13 @@ scans linearly within a stream.
 Accepts WebSocket connections at `/stream`. For each connection:
 
 - One reader task handles client frames (`auth`, `subscribe`,
-  `unsubscribe`) and, on subscribe, creates that subscription's
-  channel and hands the receiver to the writer.
+  `unsubscribe`, `publish`).
+  - On `subscribe`, the reader creates the subscription's channel
+    and hands the receiver to the writer.
+  - On `publish`, the reader audience-checks the stream's
+    `publish` field, applies the per-stream payload cap and the
+    optional per-source rate limit, then forwards the event to the
+    dispatcher — the same code path HTTP `POST /events` uses.
 - Each subscription has its own channel; a per-connection control
   channel carries closes + connection-level / keep-open `overflow`
   errors.
@@ -83,6 +110,9 @@ Accepts WebSocket connections at `/stream`. For each connection:
 When a subscription exceeds its send-queue depth, the server sends an
 `error` frame with `code: overflow` (carrying that subscription's
 `id`) and drops only that subscription; the connection stays open.
+WS publish rejections (`unauthorized_publish`,
+`publish_payload_too_large`, `rate_limited`) are likewise keep-open —
+a single bad frame does not close the connection.
 
 ### Auth
 
