@@ -445,6 +445,79 @@ streams:
   staleness is worse than a gap, set `0` where dropping is never
   acceptable and you accept the memory tradeoff.
 
+## Client SDKs
+
+The repo ships two first-party clients that hide the wire protocol
+behind a typed API. Both subscribe **and** publish over a single
+WebSocket and replay subscriptions on reconnect.
+
+| Language   | Package                       | Path                  | Install                              |
+|------------|-------------------------------|-----------------------|--------------------------------------|
+| TypeScript | `@alternet/wss-mux-client`    | `clients/typescript/` | `npm install @alternet/wss-mux-client` |
+| Rust       | `wss-mux-client`              | `clients/rust/`       | `cargo add wss-mux-client`           |
+
+The per-language README under each path is the authoritative quickstart.
+Wire surface is identical across both — a Rust publisher and a TS
+subscriber on the same stream interoperate without configuration.
+Operators who don't want a long-lived WS at all (server-to-server
+backends) can read the same event stream over HTTP via SSE — see
+"Reading events over HTTP (SSE)" above.
+
+## Building a presence service on top
+
+A common pattern this enables, without any presence-specific surface
+in wss-mux itself: clients heartbeat their liveness to a `presence`
+stream over WS publish; a separate `presence_svc` consumes the
+stream over HTTP SSE and maintains the actual presence state
+(timeouts, room membership, broadcasting status changes).
+
+```yaml
+# manifest
+streams:
+  - stream: presence
+    subscribe: ["role:member"]
+    publish:   ["role:member"]
+```
+
+Browser / native clients (no extra server-side code):
+
+```ts
+import { WssMuxClient } from "@alternet/wss-mux-client";
+const client = new WssMuxClient({ wssUrl, getToken });
+setInterval(
+  () => client.publish("presence", session.userId, { status: "online" }),
+  10_000,
+);
+```
+
+A backend `presence_svc` (in any language with an HTTP client) reads
+the same stream over SSE and applies its own logic:
+
+```bash
+curl -N \
+  -H "Authorization: Bearer $WSS_MUX_READ_AUTH_TOKEN" \
+  http://wss-mux:8080/events/presence
+```
+
+Each heartbeat lands as one `data:` line. The service tracks
+last-seen per user, expires entries after N seconds of silence, and
+publishes a derived `presence_changes` stream (also via wss-mux)
+that other clients can subscribe to:
+
+```text
+clients ──── WS publish ──→  wss-mux  ──→ SSE  ──→ presence_svc
+                                ↑                       │
+                                └── HTTP POST ──────────┘
+                                    (presence_changes)
+```
+
+Everything that makes this work — audience gating, per-source rate
+limit, default-deny on `publish`, SSE backpressure — is already in
+the manifest schema and the env-var knobs above. `presence_svc` is a
+plain consumer/producer with no special integration; the same
+template applies to chat-message persistence, audit-log shipping,
+event-sourcing projections, or any other "stream-of-stream" service.
+
 ## Deployment patterns
 
 `wss-mux` is a single binary that listens on one port for both HTTP

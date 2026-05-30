@@ -103,21 +103,30 @@ curl -X POST http://localhost:8080/events \
   -d '{"stream":"chat_messages","key":"room-42","payload":{"text":"hi"}}'
 ```
 
-Subscribe (client):
+Subscribe (client) — using the TypeScript SDK
+([`@alternet/wss-mux-client`](clients/typescript/)):
 
 ```javascript
-const ws = new WebSocket("ws://localhost:8080/stream");
-ws.onopen = () =>
-  ws.send(JSON.stringify({ type: "auth", token: "<jwt>" }));
-ws.onmessage = (m) => {
-  const f = JSON.parse(m.data);
-  if (f.type === "event") console.log(f.stream, f.key, f.payload);
-};
-// once auth'd:
-ws.send(JSON.stringify({
-  type: "subscribe", id: "s1",
-  stream: "chat_messages", key: "room-42"
-}));
+import { WssMuxClient } from "@alternet/wss-mux-client";
+const client = new WssMuxClient({
+  wssUrl: "ws://localhost:8080/stream",
+  getToken: async () => "<jwt>",
+});
+await client.subscribe("chat_messages", "room-42", (event) => {
+  console.log(event.payload);
+});
+// And publish back over the same connection:
+await client.publish("chat_messages", "room-42", { text: "hi" });
+```
+
+The repo also ships a Rust SDK at [`clients/rust/`](clients/rust/)
+(crates.io: `wss-mux-client`) with a symmetric API. Or, if you want
+a backend that doesn't keep a long-lived WebSocket open at all,
+read the same event stream over HTTP via SSE:
+
+```bash
+curl -N -H "Authorization: Bearer <read-token>" \
+  http://localhost:8080/events/chat_messages
 ```
 
 ## Configuration
