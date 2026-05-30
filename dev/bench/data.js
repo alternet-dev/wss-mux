@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780117569372,
+  "lastUpdate": 1780117611717,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -7018,6 +7018,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 108,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "db7eada2577339c8f58d21ed6539cdceabb39738",
+          "message": "chore: bump version to 0.6.0 (#101)\n\nCuts v0.6.0, the WS-publish + SDK release. Three crates / packages\nbump in lockstep:\n\n- `wss-mux` (server) `0.5.3` → `0.6.0`\n- `wss-mux-client` (Rust SDK) `0.5.3` → `0.6.0` — first crates.io publish\n- `@alternet/wss-mux-client` (TS SDK) `0.5.3` → `0.6.0`\n\n## What ships in v0.6.0\n\nWire surface (server):\n\n- `publish` ClientFrame variant (#87, #88) — a WS client emits an\n  event over the connection it already holds open. Same downstream\n  dispatch as HTTP `POST /events`.\n- Per-stream `publish` audience in the manifest (#87) — default-deny,\n  parallel to the existing `subscribe` field. Field rename from\n  `audience` → `subscribe` is the wire-breaking part (pre-1.0\n  manifest schema bump).\n- `unauthorized_publish` + `publish_payload_too_large` error codes\n  (#88), keep-open.\n- `PerSourceRateLimiter` keyed by JWT `sub` (#89, #90) — per-source\n  publish budget, sweeper task, configurable via\n  `WSS_MUX_WS_PUBLISH_RATE` / `_BURST` / `_REQUIRE_SUB` /\n  `_IDLE_TTL_SECS`.\n- `GET /events/:stream` SSE read endpoint (#91) — the backend-\n  consumer story; auth supports shared-bearer\n  (`WSS_MUX_READ_AUTH_TOKEN`) and JWT.\n\nClient SDKs:\n\n- TypeScript SDK gains `client.publish()` (#92), `publishSettleMs`\n  builder option, `unauthorized_publish` / `publish_payload_too_large`\n  in the `ErrorCode` union.\n- Rust SDK (`clients/rust/`) lands as a new crate (#93, #94) —\n  subscribe + publish, reconnect + token-refresh + heartbeat\n  internal, typed errors. `connect_async`-based, minimal deps.\n- Cross-SDK e2e harness (#96) — single-shell entrypoint that boots\n  the server, mints a JWT, runs both SDKs' gated e2e suites; new\n  path-gated `sdk-e2e.yml` workflow.\n- Rust SDK criterion benches against an in-process server (#97):\n  publish_self_roundtrip, publish_throughput, subscribe_one.\n\nCI / release:\n\n- `cargo-publish` job in `release.yml` (#98) — idempotent via\n  crates.io HEAD check, validates Cargo.toml vs tag, uses\n  `CARGO_REGISTRY_TOKEN`. TP migration tracked separately in #99.\n\nDocs:\n\n- `docs/architecture.md` + `docs/embedding.md` swept for the new\n  surface (#100), including the presence_svc pattern.\n\n## Maintainer action items before the tag fires\n\n- `CARGO_REGISTRY_TOKEN` secret set (token scoped to\n  `wss-mux-client`, `publish-new` + `publish-update`).\n- crates.io has space for the `wss-mux-client` name (first publish\n  will claim it).",
+          "timestamp": "2026-05-29T22:58:09-06:00",
+          "tree_id": "957add102e32fd1ebea536699cceee102c0e7277",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/db7eada2577339c8f58d21ed6539cdceabb39738"
+        },
+        "date": 1780117610670,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 258,
+            "range": "± 6",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1803,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3656,
+            "range": "± 11",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29664,
+            "range": "± 52",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 326,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2422,
+            "range": "± 43",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29287,
+            "range": "± 1684",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 335591,
+            "range": "± 19071",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3541563,
+            "range": "± 281366",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 139,
+            "range": "± 420",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 132,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 32199,
+            "range": "± 82",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 156,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 89,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 128,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 132,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 307,
+            "range": "± 3532",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 332,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1932,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 24955,
+            "range": "± 311",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 73,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 404,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3013,
+            "range": "± 37",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 38476,
+            "range": "± 199",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 664,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 381300,
+            "range": "± 2857",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7337,
+            "range": "± 59",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
             "range": "± 0",
             "unit": "ns/iter"
           }
