@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780123422086,
+  "lastUpdate": 1780126378868,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -287,6 +287,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 44548,
             "range": "± 3853",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a34f57c765fade212775697a53532f3741ca3510",
+          "message": "feat(cli): wss-mux validate-manifest subcommand (#102) (#105)\n\nAdds `wss-mux validate-manifest <path>`: parses + validates a\nstreams manifest using upstream's own parser, then exits 0 with a\none-line summary or 1 with the validation error. No env vars\nrequired; no server runtime spun up.\n\n## Why\n\nEmbedders that codegen the streams manifest (e.g. application-\ntemplate's Python AST walker) need to drift-check the generated YAML\nagainst upstream's schema. Today they re-implement enough of\n`src/manifest.rs` to read the file, which means the v0.6 `audience`\n→ `subscribe` rename + new `publish` field broke them silently — and\nevery future schema evolution carries the same hazard.\n\nThis subcommand makes upstream's parser the source of truth: the\nembedder's CI pre-flight shells out instead of carrying its own copy\nof the schema.\n\n## Surface\n\n```\n$ wss-mux validate-manifest config/wss-mux/streams.yaml\nok: 2 streams loaded (notification_banner, suspension_status_card)\n$ echo $?\n0\n\n$ wss-mux validate-manifest broken.yaml\nerror: ...\n$ echo $?\n1\n\n$ wss-mux validate-manifest\nusage: wss-mux validate-manifest <path>\n$ echo $?\n2\n```\n\n## Dispatch\n\n`main()` now inspects `argv[1]` synchronously before any tokio\nruntime spin-up:\n\n- `validate-manifest` → run synchronously, exit.\n- `help` / `--help` / `-h` → print usage, exit 0.\n- anything else (or no arg) → fall through to `server_main()`, which\n  carries the existing async server behavior verbatim. The new\n  surface is **additive** — `wss-mux` with no args still starts the\n  server unchanged.\n\nThe dispatch lives ahead of `Config::from_env()`, so embedders don't\nneed to satisfy the server's env-var contract when they're just\nvalidating a file.\n\n## Tests\n\n`tests/integration/validate_manifest.rs` spawns the built binary via\n`env!(\"CARGO_BIN_EXE_wss-mux\")` and asserts:\n\n- valid YAML → exit 0, stdout includes the stream count + names\n- invalid YAML → non-zero exit, stderr mentions \"error\"\n- missing path → non-zero exit\n- missing positional arg → non-zero exit with a usage hint\n\nTiny in-test tempdir helper rather than a new dev-dep.\n\n## Out of scope\n\n- `--json` structured output. Marked \"maybe\" in #102; if an embedder\n  needs structured diagnostics we can add it as a follow-up. Today's\n  callers grep stdout / treat exit code as the signal.\n- Wire-protocol validation, audience-set validation against an\n  external IdP, etc. — separate concerns per the issue.\n\n## Docs\n\n`README.md` gains a one-paragraph note under the operational\nsection.",
+          "timestamp": "2026-05-30T01:32:04-06:00",
+          "tree_id": "a2bdd2bdc8955cbc1a90c4dbc2f49dd3c54c4dd8",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/a34f57c765fade212775697a53532f3741ca3510"
+        },
+        "date": 1780126378539,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1111181,
+            "range": "± 42647",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11305260,
+            "range": "± 230956",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 113188562,
+            "range": "± 2141585",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 34755,
+            "range": "± 5929",
             "unit": "ns/iter"
           }
         ]
