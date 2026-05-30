@@ -30,3 +30,15 @@ thiserror = "1"
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 tokio-tungstenite = "0.21"
+# Benches spawn a wss-mux server in-process so the latency / throughput
+# numbers cover the full SDK → WS → server → SDK roundtrip rather than
+# a mock. `wss-mux` is dev-only — it does NOT leak into the published
+# SDK's dependency graph.
+wss-mux = { path = "../.." }
+axum = "0.7"
+jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
+
+[[bench]]
+name = "sdk_e2e"
+harness = false

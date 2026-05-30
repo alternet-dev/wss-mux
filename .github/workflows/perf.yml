@@ -45,3 +45,37 @@ jobs:
           # alert/PR-comment is informational, the trend is what matters.
           fail-on-alert: false
           alert-threshold: '200%'
+
+  sdk-benchmarks:
+    name: sdk benchmarks (report-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/rust
+      - name: Run SDK e2e benches
+        # Report-only: a hiccup here must never fail the check.
+        continue-on-error: true
+        # The SDK bench spawns an in-process wss-mux server; numbers are
+        # the full SDK ↔ server roundtrip on loopback, not synthetic.
+        # Keep `--measurement-time` short so the whole job finishes in
+        # well under a minute on a hosted runner.
+        working-directory: clients/rust
+        run: cargo bench --bench sdk_e2e -- --measurement-time 2 --warm-up-time 1 --output-format bencher | tee bench-output.txt
+      - name: Publish + track SDK results
+        continue-on-error: true
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: wss-mux-client SDK benchmarks
+          tool: cargo
+          output-file-path: clients/rust/bench-output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: gh-pages
+          benchmark-data-dir-path: dev/bench/sdk
+          auto-push: ${{ github.event_name == 'push' }}
+          comment-on-alert: true
+          summary-always: true
+          fail-on-alert: false
+          alert-threshold: '200%'
