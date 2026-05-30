@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780117611717,
+  "lastUpdate": 1780123835694,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -7252,6 +7252,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "46374939844e2750bcb0eeddab6dfc6797f2585c",
+          "message": "fix(oidc): split discovery_url from issuer (closes #86) (#104)\n\nLets the public `iss` value tokens carry diverge from the URL\nwss-mux fetches discovery from. The Keycloak\n`KC_HOSTNAME_BACKCHANNEL_DYNAMIC` pattern (and analogous setups for\nother IdPs) deliberately splits these — tokens minted on either the\npublic or in-cluster host claim the public issuer, while metadata\nendpoints serve via whichever host the request actually arrived on.\n\n## Before\n\n`OidcConfig.issuer` did two jobs at once: token-iss validation\n(`set_issuer(&[issuer])` in auth) AND the discovery base\n(`<issuer>/.well-known/openid-configuration` in oidc). Operators\nrunning Keycloak BACKCHANNEL_DYNAMIC had to point\n`WSS_MUX_OIDC_ISSUER` at the public URL (token-iss matches) and then\npin `WSS_MUX_OIDC_JWKS_URL` to the in-cluster endpoint to skip\ndiscovery entirely — sidestepping OIDC's \"the IdP tells you the\nendpoints\" guarantee.\n\n## After\n\nNew optional `OidcConfig.discovery_url` (env\n`WSS_MUX_OIDC_DISCOVERY_URL`). When set, it's the discovery base;\nwhen unset, the discovery base is `issuer` (existing behavior).\nToken-iss validation is unchanged — still pinned to `issuer`.\n`jwks_url` is also unchanged; if set it still short-circuits the\nwhole discovery dance.\n\n```bash\nWSS_MUX_OIDC_ISSUER=https://auth.example.com/realms/x       # token iss\nWSS_MUX_OIDC_DISCOVERY_URL=http://keycloak:8080/realms/x    # discovery base\n# jwks_url left unset — the discovery doc tells us where keys live,\n# and BACKCHANNEL_DYNAMIC makes that URL in-cluster too.\n```\n\n## Tests\n\n- `src/oidc.rs`: `discovery_url_base_overrides_issuer` —\n  resolve_jwks_url fetches discovery at the in-cluster URL and\n  returns the in-cluster jwks_uri the doc carries.\n- `src/oidc.rs`: `jwks_url_still_short_circuits_discovery_url` —\n  explicit jwks_url still wins over discovery_url.\n- `src/config.rs`: `oidc_discovery_url_is_read_independently_of_issuer`\n  — env-var plumbing.\n\nPlus the existing OIDC test fixtures + the integration test's\n`oidc_cfg` helper threaded for the new field.\n\n## Out of scope\n\n- Caching changes (discovery cache is already separate from JWKS).\n- Validation strictness (`set_issuer(&[issuer])` is correct as-is).\n- Multi-issuer (still one IdP per multiplexer).\n\n## Docs\n\n- `docs/embedding.md` OIDC section: new env var + a paragraph on\n  the BACKCHANNEL_DYNAMIC use case.\n- `README.md` config table: new row, JWKS row clarified to reference\n  the discovery base.",
+          "timestamp": "2026-05-30T00:42:44-06:00",
+          "tree_id": "3a151ed0d74fda485428b16b2e04ce66a009d6cb",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/46374939844e2750bcb0eeddab6dfc6797f2585c"
+        },
+        "date": 1780123834811,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 236,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1592,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3072,
+            "range": "± 66",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 27129,
+            "range": "± 312",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 256,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 1818,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 22165,
+            "range": "± 1203",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 284759,
+            "range": "± 35504",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3805778,
+            "range": "± 55307",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 122,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 108,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 26000,
+            "range": "± 98",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 125,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 13,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 38,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 67,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 97,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 98,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 116,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 244,
+            "range": "± 3422",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 274,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1480,
+            "range": "± 13",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 16571,
+            "range": "± 290",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 58,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 60,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 265,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3065,
+            "range": "± 17",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 110,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 31112,
+            "range": "± 164",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 570,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 302422,
+            "range": "± 1790",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 4896,
+            "range": "± 28",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 109,
             "range": "± 0",
             "unit": "ns/iter"
           }
