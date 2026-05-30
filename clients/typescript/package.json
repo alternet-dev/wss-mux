@@ -1,6 +1,6 @@
 {
   "name": "@alternet/wss-mux-client",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "description": "Browser TypeScript client for wss-mux WebSocket multiplexer",
   "type": "module",
   "main": "./dist/index.js",
