@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780126378868,
+  "lastUpdate": 1780126681843,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -335,6 +335,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 34755,
             "range": "± 5929",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ebd4de160f381268afd7ed16933812812c5fc1af",
+          "message": "docs(client-ts): pin getToken contract; assert fresh token on wire after 4401 (closes #103) (#106)\n\nTwo pieces:\n\n## Doc the contract\n\nThe TS SDK's `getToken` callback has a precise contract the README\nonly gestured at: called on initial connect AND on close-code 4401,\n*and the freshly returned value reaches the wire* (no stale-cache\nwindow across a 4401-driven reconnect). Other reconnects reuse the\ncached token so a flapping connection doesn't hammer the issuer.\n\nEmbedders rely on this for token-rotation safety nets — a SPA's\nshort-lived JWT can refresh out-of-band, and the SDK auto-recovers\non the next 4401 without re-mounting the client.\n\nREADME's getToken section now spells out:\n\n- Exactly when the SDK invokes it (initial connect + 4401 reconnect).\n- That the fresh value reaches the wire on the post-4401 connection,\n  not a cached previous value.\n- The non-4401 reconnect caching behavior, so consumers don't expect\n  refresh on every disconnect.\n- Pre-emptive refresh is out of scope (app-layer concern).\n\n## Strengthen the test\n\n`reconnect.test.mjs` already had \"4401 close triggers fresh\ngetToken() call\", which asserts *getToken was called twice* and the\ntwo returned tokens differ — but not that the second one actually\nmakes it onto the wire. That's a real failure mode (cache-\ninvalidation order bug, stale closure capture, etc.) and not\nsomething the existing test would catch.\n\nNew test `4401 reconnect sends the freshly-fetched token on the\nwire`: the mock server records auth frames per connection; the\ntest asserts the post-4401 connection's auth-frame `token` is\nexactly the new value returned by getToken, not the initial one.\n\nSuite total: 20 pass / 4 skip (e2e), was 19 / 4. typecheck clean.\n\n## Out of scope\n\n- Pre-emptive refresh strategy. Per the issue, that's an app-layer\n  feature — the SDK only handles the 4401-driven safety net.\n- Refresh contracts for the Rust SDK. Same shape but different\n  language idioms; a follow-up if asked.",
+          "timestamp": "2026-05-30T01:37:03-06:00",
+          "tree_id": "64eb35311c85b49c4f029b1211a6f1e4886a727d",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/ebd4de160f381268afd7ed16933812812c5fc1af"
+        },
+        "date": 1780126681354,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1111004,
+            "range": "± 44351",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11173928,
+            "range": "± 262101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 112339878,
+            "range": "± 1745850",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 29017,
+            "range": "± 1389",
             "unit": "ns/iter"
           }
         ]
