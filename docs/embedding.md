@@ -163,7 +163,8 @@ runs.
 WSS_MUX_OIDC_ISSUER=https://idp.example.com   # enables OIDC
 WSS_MUX_OIDC_AUDIENCE=wss-mux                  # required: the aud to pin
 # optional:
-WSS_MUX_OIDC_JWKS_URL=...                      # else discovered from the issuer
+WSS_MUX_OIDC_DISCOVERY_URL=...                 # discovery base; default = issuer
+WSS_MUX_OIDC_JWKS_URL=...                      # else discovered from the discovery base
 WSS_MUX_OIDC_GROUPS_CLAIM=groups               # default
 WSS_MUX_OIDC_PRINCIPAL_PREFIX=role:            # default: none
 WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
@@ -182,7 +183,13 @@ WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
   low-privilege set, **not** an error (parity with a handshake token
   that carries no principals).
 - **JWKS endpoint.** `WSS_MUX_OIDC_JWKS_URL` if set, else discovered
-  from `<issuer>/.well-known/openid-configuration`.
+  from `<discovery base>/.well-known/openid-configuration`, where the
+  discovery base is `WSS_MUX_OIDC_DISCOVERY_URL` if set, otherwise
+  `WSS_MUX_OIDC_ISSUER`. Splitting the discovery base from the issuer
+  is what makes the Keycloak `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` pattern
+  work: tokens still carry the public `iss` (and `wss-mux` validates
+  against that), but discovery — and the `jwks_uri` it returns —
+  resolves to an in-cluster address that never leaves the cluster.
 - **Resilience.** The JWKS is fetched at startup and refreshed every
   `WSS_MUX_OIDC_JWKS_REFRESH` seconds; a failed refresh is logged +
   metered (`wss_mux_oidc_jwks_refresh`) and keeps the last-good cache,

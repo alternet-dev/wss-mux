@@ -56,14 +56,22 @@ pub struct HandshakeKeyConfig {
 #[derive(Debug, Clone)]
 pub struct OidcConfig {
     /// `WSS_MUX_OIDC_ISSUER` — the IdP issuer URL; also the `iss` the
-    /// token must carry.
+    /// token must carry. Used for strict token-iss validation and, by
+    /// default, as the discovery base.
     pub issuer: String,
     /// `WSS_MUX_OIDC_AUDIENCE` — required: the `aud` the token must
     /// carry (pinning an audience is mandatory; accepting any
     /// audience is unsafe).
     pub audience: String,
+    /// `WSS_MUX_OIDC_DISCOVERY_URL` — base for the OIDC discovery
+    /// document. When present, `<discovery_url>/.well-known/openid-configuration`
+    /// is fetched; otherwise the base is `issuer`. Lets the public
+    /// `iss` value (what tokens carry) diverge from the in-cluster
+    /// endpoint wss-mux actually reaches — the Keycloak
+    /// `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` pattern, etc.
+    pub discovery_url: Option<String>,
     /// `WSS_MUX_OIDC_JWKS_URL` — explicit JWKS endpoint; absent ⇒
-    /// discovered from `<issuer>/.well-known/openid-configuration`.
+    /// discovered from `<discovery_url|issuer>/.well-known/openid-configuration`.
     pub jwks_url: Option<String>,
     /// `WSS_MUX_OIDC_GROUPS_CLAIM` (default `groups`) — array claim
     /// whose values become principals.
@@ -436,6 +444,7 @@ impl Config {
                 // party authenticate here.
                 audience: non_blank(get("WSS_MUX_OIDC_AUDIENCE"))
                     .ok_or(ConfigError::Missing("WSS_MUX_OIDC_AUDIENCE"))?,
+                discovery_url: non_blank(get("WSS_MUX_OIDC_DISCOVERY_URL")),
                 jwks_url: non_blank(get("WSS_MUX_OIDC_JWKS_URL")),
                 groups_claim: non_blank(get("WSS_MUX_OIDC_GROUPS_CLAIM"))
                     .unwrap_or_else(|| DEFAULT_OIDC_GROUPS_CLAIM.to_string()),
@@ -802,9 +811,40 @@ mod tests {
         assert_eq!(oidc.issuer, "https://idp.example");
         assert_eq!(oidc.audience, "wss-mux");
         assert!(oidc.jwks_url.is_none(), "discovery unless overridden");
+        assert!(
+            oidc.discovery_url.is_none(),
+            "discovery base defaults to issuer unless overridden"
+        );
         assert_eq!(oidc.groups_claim, "groups");
         assert_eq!(oidc.principal_prefix, "");
         assert_eq!(oidc.jwks_refresh, std::time::Duration::from_secs(300));
+    }
+
+    #[test]
+    fn oidc_discovery_url_is_read_independently_of_issuer() {
+        // BACKCHANNEL_DYNAMIC scenario: tokens carry the public issuer
+        // (what `iss` claims), discovery is fetched in-cluster.
+        let pairs = vec![
+            ("WSS_MUX_PUSH_AUTH_TOKEN", "t"),
+            ("WSS_MUX_STREAMS_MANIFEST_PATH", "p"),
+            ("WSS_MUX_OIDC_ISSUER", "https://auth.example.com/realms/x"),
+            ("WSS_MUX_OIDC_AUDIENCE", "wss-mux"),
+            (
+                "WSS_MUX_OIDC_DISCOVERY_URL",
+                "http://keycloak:8080/realms/x",
+            ),
+        ];
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        let oidc = cfg.oidc.expect("oidc");
+        assert_eq!(oidc.issuer, "https://auth.example.com/realms/x");
+        assert_eq!(
+            oidc.discovery_url.as_deref(),
+            Some("http://keycloak:8080/realms/x")
+        );
+        assert!(
+            oidc.jwks_url.is_none(),
+            "jwks_url unset — discovery will be reached via discovery_url"
+        );
     }
 
     #[test]

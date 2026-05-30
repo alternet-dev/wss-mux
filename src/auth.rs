@@ -255,6 +255,7 @@ mod tests {
         OidcVerifier::from_config(&OidcConfig {
             issuer: "https://idp.example".into(),
             audience: "wss-mux".into(),
+            discovery_url: None,
             jwks_url: None,
             groups_claim: "groups".into(),
             principal_prefix: "role:".into(),

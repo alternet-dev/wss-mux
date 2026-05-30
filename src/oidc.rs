@@ -40,14 +40,22 @@ struct Discovery {
 }
 
 /// The JWKS endpoint: the explicit `WSS_MUX_OIDC_JWKS_URL` override if
-/// set, else discovered from the issuer's well-known document.
+/// set, else discovered from `<discovery_url|issuer>`'s well-known
+/// document.
+///
+/// `discovery_url` decouples the *reach* of OIDC discovery from the
+/// *iss* claim — the BACKCHANNEL_DYNAMIC pattern: tokens carry the
+/// public issuer (which `set_issuer` pins in auth) while discovery
+/// targets an in-cluster endpoint that hands back jwks_uri pointing
+/// at the same in-cluster host.
 pub async fn resolve_jwks_url(http: &impl HttpGet, cfg: &OidcConfig) -> anyhow::Result<String> {
     if let Some(url) = &cfg.jwks_url {
         return Ok(url.clone());
     }
+    let base = cfg.discovery_url.as_deref().unwrap_or(&cfg.issuer);
     let discovery_url = format!(
         "{}/.well-known/openid-configuration",
-        cfg.issuer.trim_end_matches('/')
+        base.trim_end_matches('/')
     );
     let body = http.get_bytes(discovery_url).await?;
     let disc: Discovery = serde_json::from_slice(&body)
@@ -71,9 +79,18 @@ mod tests {
     use std::time::Duration;
 
     fn cfg(issuer: &str, jwks_url: Option<&str>) -> OidcConfig {
+        cfg_with_discovery(issuer, None, jwks_url)
+    }
+
+    fn cfg_with_discovery(
+        issuer: &str,
+        discovery_url: Option<&str>,
+        jwks_url: Option<&str>,
+    ) -> OidcConfig {
         OidcConfig {
             issuer: issuer.into(),
             audience: "wss-mux".into(),
+            discovery_url: discovery_url.map(str::to_string),
             jwks_url: jwks_url.map(str::to_string),
             groups_claim: "groups".into(),
             principal_prefix: String::new(),
@@ -133,6 +150,56 @@ mod tests {
             "https://idp.example/jwks.json"
         );
         assert_eq!(fetch_jwks(&f, &c).await.unwrap().keys.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn discovery_url_base_overrides_issuer() {
+        // The Keycloak BACKCHANNEL_DYNAMIC pattern: tokens carry a
+        // public issuer (`https://auth.example.com/realms/x`) while
+        // discovery is reached via an in-cluster name
+        // (`http://keycloak:8080/realms/x`). resolve_jwks_url must
+        // fetch discovery from the in-cluster URL, not the public
+        // one. The discovery document then dictates the JWKS URL.
+        let disc = r#"{"issuer":"https://auth.example.com/realms/x","jwks_uri":"http://keycloak:8080/realms/x/protocol/openid-connect/certs"}"#;
+        let f = Fake(HashMap::from([
+            (
+                "http://keycloak:8080/realms/x/.well-known/openid-configuration".to_string(),
+                disc.as_bytes().to_vec(),
+            ),
+            (
+                "http://keycloak:8080/realms/x/protocol/openid-connect/certs".to_string(),
+                JWKS.as_bytes().to_vec(),
+            ),
+        ]));
+        let c = cfg_with_discovery(
+            "https://auth.example.com/realms/x",
+            Some("http://keycloak:8080/realms/x"),
+            None,
+        );
+        assert_eq!(
+            resolve_jwks_url(&f, &c).await.unwrap(),
+            "http://keycloak:8080/realms/x/protocol/openid-connect/certs"
+        );
+        assert_eq!(fetch_jwks(&f, &c).await.unwrap().keys.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn jwks_url_still_short_circuits_discovery_url() {
+        // Explicit `jwks_url` overrides everything — discovery is
+        // never reached, so the discovery_url field is irrelevant.
+        let f = Fake(HashMap::from([(
+            "https://idp.example/keys".to_string(),
+            JWKS.as_bytes().to_vec(),
+        )]));
+        let c = cfg_with_discovery(
+            "https://idp.example",
+            Some("http://internal-but-unused"),
+            Some("https://idp.example/keys"),
+        );
+        assert_eq!(
+            resolve_jwks_url(&f, &c).await.unwrap(),
+            "https://idp.example/keys"
+        );
     }
 
     #[tokio::test]

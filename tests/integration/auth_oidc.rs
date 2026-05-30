@@ -41,6 +41,7 @@ fn oidc_cfg(issuer: &str) -> OidcConfig {
     OidcConfig {
         issuer: issuer.to_string(),
         audience: "wss-mux".into(),
+        discovery_url: None,
         jwks_url: None, // exercise discovery
         groups_claim: "groups".into(),
         principal_prefix: "role:".into(),
