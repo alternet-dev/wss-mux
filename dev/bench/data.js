@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780116669165,
+  "lastUpdate": 1780117569372,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -6784,6 +6784,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 119,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ccb5f427f5f5ca007f1b65340a1cad2a5c825c47",
+          "message": "docs: v0.6 sweep — WS publish, SSE read, SDKs, presence_svc pattern (#100)\n\nBrings the three repo-level docs in line with the v0.6 wire surface\nthat landed across #87–#94 and #95.\n\n## architecture.md\n\n- Dispatch diagram now shows the SSE read endpoint (HTTP server) and\n  publish on the WS server, matching `build_app`'s route table.\n- New \"Unified dispatch\" callout: HTTP push, WS publish, WS subscribe,\n  and SSE read all share the dispatcher and registry — the four wire\n  surfaces differ only in framing.\n- HTTP server section gains a paragraph on `GET /events/:stream`\n  (auth matrix + dispatcher-side parity with WS subscribe).\n- WS server section now covers the `publish` frame: audience check,\n  per-stream payload cap, per-source rate limit, dispatch via the\n  same path as HTTP `POST /events`. Notes that publish rejections\n  are keep-open (same posture as `overflow`).\n\n## embedding.md\n\n- New \"Client SDKs\" section pointing to the TS and Rust SDKs under\n  `clients/` and noting they're wire-compatible.\n- New \"Building a presence service on top\" section — the canonical\n  end-to-end example the v0.6 design was shaped around. Shows the\n  manifest stanza, a browser-side heartbeat using the TS SDK, and an\n  HTTP SSE consumer pattern for a backend presence_svc. Closes with\n  the schematic of clients ↔ wss-mux ↔ presence_svc.\n\n## README.md\n\n- Quick start's Subscribe example switches from a raw WebSocket\n  snippet to the TS SDK quickstart — more representative of how\n  consumers actually integrate. Same example also demonstrates\n  `client.publish()` over the same connection.\n- Adds pointers to the Rust SDK and the SSE read endpoint for the\n  non-WS consumer story.\n\nNo changes to `docs/protocol.md` — wire surface for publish frames\nand `unauthorized_publish` / `publish_payload_too_large` was already\ndocumented when the frames landed.",
+          "timestamp": "2026-05-29T22:58:04-06:00",
+          "tree_id": "73f0fc3ad7213ae0210fc9cf6f278c6788b84fb2",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/ccb5f427f5f5ca007f1b65340a1cad2a5c825c47"
+        },
+        "date": 1780117568069,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 230,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1508,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3125,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 25831,
+            "range": "± 45",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 251,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 1827,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 22388,
+            "range": "± 1176",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 313639,
+            "range": "± 29701",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4823792,
+            "range": "± 320046",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 124,
+            "range": "± 315",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 112,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 26072,
+            "range": "± 141",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 130,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 12,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 41,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 67,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 97,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 99,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 113,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 246,
+            "range": "± 5960",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 278,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1486,
+            "range": "± 43",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 16613,
+            "range": "± 216",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 59,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 60,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 262,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2952,
+            "range": "± 23",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 111,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 31096,
+            "range": "± 558",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 570,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 305998,
+            "range": "± 3644",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 5207,
+            "range": "± 32",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 108,
             "range": "± 0",
             "unit": "ns/iter"
           }
