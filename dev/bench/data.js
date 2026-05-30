@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780098946362,
+  "lastUpdate": 1780105498434,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -6082,6 +6082,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "270dc120d132b2fd712ecf279a09d8768513be44",
+          "message": "feat(client-rust): SDK e2e benches against in-process wss-mux (#97)\n\nAdds `cargo bench --bench sdk_e2e` in the Rust client crate. Each\nbench spawns a real `wss-mux` server in-process on an ephemeral port\nand drives the SDK against it, so the numbers reflect the full SDK ↔\nserver roundtrip (serialize → WS write → server parse + audience +\ndispatch → WS read → SDK deserialize → channel hand-off) rather than\na mock or microbench.\n\n## Benches\n\n- `publish_self_roundtrip` — single publish + own subscribe recv;\n  ~1.2 ms on M-series loopback.\n- `publish_throughput/{10,100}` — N publishes back-to-back, then\n  receive all N. Reports events/sec via criterion's `Throughput`.\n- `subscribe_one` — bind a subscription, drop it (sends unsubscribe);\n  ~20 µs on loopback.\n\n## Dependencies\n\nDev-only — published SDK dependency graph is unaffected:\n\n- `wss-mux` (path = \"../..\") — server crate, for the in-process bind.\n- `axum` — for `axum::serve` in the bench harness.\n- `jsonwebtoken` — HS256-sign the bench's JWT directly.\n- `criterion` with `async_tokio` — bench driver.\n\n## CI\n\n`.github/workflows/perf.yml` gains a `sdk-benchmarks (report-only)`\njob mirroring the existing wss-mux microbench job. Same posture: never\nfail the build, comment alerts on PRs, persist the trend on trunk to\nthe gh-pages dashboard under `dev/bench/sdk/`. `--measurement-time 2\n--warm-up-time 1` keeps the whole job well under a minute on a hosted\nrunner.\n\n## Settle window\n\nThe client builder is configured with `publish_settle: Duration::ZERO`\nso the publish() future resolves immediately and the bench's `recv()`\ncaptures the actual server roundtrip latency. The throughput bench\nexploits this same property to publish N back-to-back before draining\nthe receiver.\n\n## Rate limiter\n\nThe bench-side `Config` zeroes `inbound_rate_per_sec`,\n`inbound_burst`, and the `ws_publish_*` knobs. The bench's whole\npurpose is to measure throughput from one principal hammering one\nstream — the limiter behavior is its own bench (`per_source_rate_limit`\nin the server crate).",
+          "timestamp": "2026-05-29T19:36:16-06:00",
+          "tree_id": "0385db0507740f7fe4e51f3fa5a58715c9e78335",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/270dc120d132b2fd712ecf279a09d8768513be44"
+        },
+        "date": 1780105497621,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 255,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1617,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3654,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29331,
+            "range": "± 99",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 323,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2478,
+            "range": "± 94",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29456,
+            "range": "± 1731",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 323002,
+            "range": "± 19052",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 4607634,
+            "range": "± 268402",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 145,
+            "range": "± 395",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 138,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 32272,
+            "range": "± 114",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 162,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 127,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 148,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 302,
+            "range": "± 10169",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 333,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1933,
+            "range": "± 35",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 23528,
+            "range": "± 358",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 73,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 348,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 4112,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 43961,
+            "range": "± 216",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 660,
+            "range": "± 4",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 376315,
+            "range": "± 3928",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6881,
+            "range": "± 31",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 135,
             "range": "± 0",
             "unit": "ns/iter"
           }
