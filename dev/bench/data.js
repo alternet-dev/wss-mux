@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780127145499,
+  "lastUpdate": 1780127970096,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -7954,6 +7954,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 135,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4211a5be187d4c41110e4f1b186bb12a7a9d645c",
+          "message": "chore: bump version to 0.6.1 (#107)\n\nPatch release on top of 0.6.0. Three packages move in lockstep:\n\n- `wss-mux` (server) 0.6.0 → 0.6.1\n- `wss-mux-client` (Rust SDK) 0.6.0 → 0.6.1\n- `@alternet/wss-mux-client` (TS SDK) 0.6.0 → 0.6.1\n\n## What ships\n\n- OIDC: split discovery_url from issuer (#104) — new\n  `WSS_MUX_OIDC_DISCOVERY_URL` env var lets the public `iss` value\n  tokens carry diverge from the URL wss-mux fetches discovery from.\n  Resolves the Keycloak `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` pain point\n  where the only workaround was pinning `WSS_MUX_OIDC_JWKS_URL` and\n  giving up the rest of the discovery doc.\n- `wss-mux validate-manifest <path>` subcommand (#105) — parses +\n  validates a streams manifest using upstream's own parser. Exits 0\n  with a one-line summary, 1 on validation error, 2 on usage error.\n  No env vars required, no server runtime. For embedders' CI\n  pre-flight on codegen'd manifests.\n- TS SDK: getToken contract pinned in the README + a wire-level test\n  asserting the freshly-fetched token actually reaches the auth\n  frame on a 4401-driven reconnect (#106). No behavior change in\n  the SDK; characterization test locks the invariant against\n  regression.\n\nThe Rust SDK has no source changes; the version bump is the\nlockstep half. crates.io publishes a 0.6.1 with identical code to\n0.6.0 so the trio's versions stay aligned.\n\n## No wire-breaking changes\n\nPatch release — all wire surfaces (envelope, manifest schema, error\ncodes, close codes, subprotocol) are byte-identical to 0.6.0. A\n0.6.0 client speaks to a 0.6.1 server and vice versa, no changes.",
+          "timestamp": "2026-05-30T01:50:52-06:00",
+          "tree_id": "dc31810eff8881947a81cf1fdbe87e0b364401c6",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/4211a5be187d4c41110e4f1b186bb12a7a9d645c"
+        },
+        "date": 1780127969795,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 251,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1616,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3811,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 29412,
+            "range": "± 60",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 331,
+            "range": "± 21",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2383,
+            "range": "± 45",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 29241,
+            "range": "± 1732",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 352669,
+            "range": "± 25511",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 3589943,
+            "range": "± 201299",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 141,
+            "range": "± 384",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 136,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 31986,
+            "range": "± 355",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 159,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 86,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 125,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 129,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 131,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 146,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 313,
+            "range": "± 1484",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 332,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1936,
+            "range": "± 39",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 23701,
+            "range": "± 396",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 71,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 74,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 334,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3945,
+            "range": "± 25",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 149,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 42057,
+            "range": "± 209",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 659,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 370232,
+            "range": "± 2671",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 7816,
+            "range": "± 61",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 134,
             "range": "± 0",
             "unit": "ns/iter"
           }
