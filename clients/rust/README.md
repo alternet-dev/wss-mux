@@ -127,6 +127,24 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
+## Benches
+
+`cargo bench --bench sdk_e2e` spins up an in-process `wss-mux` server
+on an ephemeral port and runs the SDK against it. The numbers are
+full-stack: SDK serialize → WS write → server parse + audience + dispatch
+→ WS read → SDK deserialize → channel hand-off.
+
+| Bench                     | Measures                                |
+|---------------------------|-----------------------------------------|
+| `publish_self_roundtrip`  | Publish-to-self-subscribe latency       |
+| `publish_throughput/{N}`  | Sustained events/sec for N back-to-back |
+| `subscribe_one`           | One subscribe + drop+unsubscribe        |
+
+`wss-mux`, `axum`, `jsonwebtoken`, and `criterion` are dev-only deps —
+the published SDK's runtime dependency graph is unaffected. The
+report-only `perf.yml` workflow tracks these alongside the server's
+microbenches.
+
 ## License
 
 MIT OR Apache-2.0.
