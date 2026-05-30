@@ -269,6 +269,72 @@ jobs:
           fi
           npm publish --provenance --access public
 
+  # ---------- crates.io publish for wss-mux-client ----------
+
+  cargo-publish:
+    name: cargo-publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clients/rust
+
+      # Trusted Publishing for crates.io is not GA yet (mid-2026); the
+      # token path is the only option. CARGO_REGISTRY_TOKEN is a
+      # publish-scoped API token from crates.io (Account → Settings →
+      # New Token), stored as a repo secret. If it's missing the step
+      # fails fast with a clear message rather than producing a
+      # silent unauthorized error from `cargo publish`.
+      - name: Verify token is configured
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+            echo "CARGO_REGISTRY_TOKEN secret is not configured." >&2
+            echo "Create a publish-only token at https://crates.io/me and add it to the repo secrets." >&2
+            exit 1
+          fi
+
+      - name: Sanity-build the crate
+        run: cargo build --release
+
+      - name: Publish to crates.io
+        # Idempotent: if wss-mux-client@$VERSION already exists on the
+        # registry (e.g. on a retag of an already-published version),
+        # skip rather than fail. Matches the npm-publish + github-
+        # release jobs' same posture.
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="$(grep '^version' Cargo.toml | head -1 | sed -E 's/version *= *"([^"]+)".*/\1/')"
+          # crates.io tags are "vX.Y.Z" or "vX.Y.Z-suffix"; the crate
+          # version is the suffix-less form. Cross-check the tag against
+          # Cargo.toml so a bad bump fails the publish loudly.
+          TAG_VERSION="${REF_NAME#v}"
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag ($TAG_VERSION) does not match Cargo.toml version ($VERSION)." >&2
+            echo "Bump Cargo.toml to $TAG_VERSION (or retag) before re-running." >&2
+            exit 1
+          fi
+          # crates.io publishes a /versions/$VER endpoint that 200s when
+          # the version exists, 404s otherwise. Use a HEAD-style check.
+          status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://crates.io/api/v1/crates/wss-mux-client/$VERSION" \
+            -H 'User-Agent: wss-mux-release-workflow')"
+          if [ "$status" = "200" ]; then
+            echo "wss-mux-client@$VERSION already published; skipping."
+            exit 0
+          fi
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+
   # ---------- Homebrew tap formula update ----------
 
   homebrew-tap:
