@@ -223,6 +223,31 @@ In practice this file is generated from your application's source of
 truth (RBAC config, code annotations, etc.) and shipped to `wss-mux`
 as part of deployment.
 
+### Pre-flight validation
+
+If your manifest is codegenned from upstream truth (DB schema, ORM
+receivers, RBAC config, etc.), wire `validate-manifest` into your CI
+alongside whatever drift check you run on the codegen output:
+
+```bash
+# 1. Codegen vs. file-on-disk drift
+your-codegen-tool > /tmp/streams.expected.yaml
+diff /tmp/streams.expected.yaml config/wss-mux/streams.yaml
+
+# 2. Upstream parser sanity
+wss-mux validate-manifest config/wss-mux/streams.yaml
+```
+
+Step 2 catches the cases step 1 misses — your codegen output drifts
+from `wss-mux`'s schema (a field rename, a constraint tightening in a
+`wss-mux` minor bump, a new required key). With both checks wired,
+the only way the running server rejects your manifest is during a
+`wss-mux` upgrade, never on a normal codegen change.
+
+`validate-manifest` exits 0 with a one-line summary on success, 1 on
+validation error (with the error on stderr), 2 on usage error. No env
+vars required; no server runtime spun up.
+
 ### Audience matching
 
 Each audience entry is matched against the connection's principals in
