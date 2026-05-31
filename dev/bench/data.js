@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780188018941,
+  "lastUpdate": 1780188571345,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -8422,6 +8422,240 @@ window.BENCHMARK_DATA = {
           {
             "name": "registry_subscribe_unsubscribe",
             "value": 133,
+            "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9981e9cbd4d5f51864991e8daac07bd4c9f69aae",
+          "message": "feat(client-rust): expose ConnectionState via watch::Receiver (#111)\n\nPer #109. The TS SDK ships `onStateChange(state)` so consumers can\ndrive UI affordances (a \"reconnecting…\" indicator, a publish-\ndisabled guard until `Ready`) off the connection lifecycle. The\nRust SDK shipped without an equivalent — consumers could only infer\nstate from operation outcomes, which makes a Tauri-style desktop\nshell unable to surface `Reconnecting` mid-blip or\n`Authenticating` during the auth-frame pre-ack window.\n\n## Surface\n\n```rust\nlet mut rx = client.state_changes();           // watch::Receiver\nwhile rx.changed().await.is_ok() {\n    let s = *rx.borrow();\n    // drive UI…\n}\n\n// Or sample without subscribing:\nlet s = client.state();                        // Copy snapshot\n```\n\n`ConnectionState` is a `Debug, Clone, Copy, Eq, Hash` enum with\nvariants matching the TS SDK's `onStateChange` vocabulary:\n`Idle, Connecting, Authenticating, Ready, Reconnecting, Closing,\nClosed`.\n\n## Why watch and not broadcast / callback\n\nPer the issue's stated preference (option b). `watch` is idiomatic\nasync Rust:\n\n- Composes natively with `tokio::select!` — Tauri IPC bridges use\n  it directly.\n- No `Send + 'static` closure ceremony.\n- The \"what's the current state right now\" sampling is free\n  (`borrow()`).\n\nThe cost is coalescing on rapid transitions: when the drive crosses\ntwo phases between two consumer polls (the `Authenticating` window\non fast loopback is sub-millisecond), the receiver reads the later\nstate when it wakes. This is the right shape for \"is it Ready or\nnot\" UI logic; it's documented in the README + on `state_changes`\nso consumers who need every step have informed expectations.\n\n## Internals\n\n- `Drive` gains a `watch::Sender<ConnectionState>` field, plus a\n  small `set_state` helper.\n- Transition sites: `connect()` brackets the auth write with\n  `Connecting → Authenticating → Ready`; the reconnect path emits\n  `Reconnecting` before backoff; the `Close` command emits\n  `Closing` before sending the close frame; terminal outcomes\n  (Closed, BadFrame, ReconnectExhausted, initial-connect-fail)\n  emit `Closed`.\n- `ClientInner` stores a `watch::Receiver<ConnectionState>` for\n  `state()` snapshots and `state_changes()` clones.\n\n## Tests\n\n`clients/rust/tests/connection_state.rs` — 4 new:\n\n- `build_lands_client_in_ready_state` — initial-connect happy path.\n- `close_transitions_to_closed` — explicit shutdown lands Closed.\n- `state_changes_yields_a_transition_on_close` — `changed().await`\n  fires; the borrowed value after the change is `Closed`.\n- `server_close_drives_reconnecting_then_back_to_ready` — transient\n  abnormal close walks through `Reconnecting` and lands back in\n  `Ready`. The \"must pass through Reconnecting\" assertion holds\n  here because the backoff sleep guarantees the drive parks long\n  enough for the receiver to observe it.\n\nSuite total: 30 pass (was 26). clippy + fmt clean.\n\n## Docs\n\n- `clients/rust/README.md` documents `state()`, `state_changes()`,\n  the enum vocabulary, and the watch-coalescing trade-off.\n- Module-level rustdoc on `ConnectionState` spells out the happy-\n  path + reconnect + close sequences.",
+          "timestamp": "2026-05-30T18:40:54-06:00",
+          "tree_id": "b1170b56c4f59fdc0a5efafa188f413d446f177a",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/9981e9cbd4d5f51864991e8daac07bd4c9f69aae"
+        },
+        "date": 1780188570483,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 241,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1452,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3284,
+            "range": "± 148",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 26480,
+            "range": "± 389",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 354,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 3121,
+            "range": "± 75",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 35648,
+            "range": "± 1503",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 511420,
+            "range": "± 33889",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 7180309,
+            "range": "± 492953",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 149,
+            "range": "± 101",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 122,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 36308,
+            "range": "± 2309",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 144,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 18,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 48,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 86,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 115,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 117,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 121,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 134,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 316,
+            "range": "± 1595",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 640,
+            "range": "± 24",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1891,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 20587,
+            "range": "± 973",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 64,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 66,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 404,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 83,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3174,
+            "range": "± 10",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 123,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 42558,
+            "range": "± 98",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 684,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 417962,
+            "range": "± 741",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 5950,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 121,
             "range": "± 0",
             "unit": "ns/iter"
           }
