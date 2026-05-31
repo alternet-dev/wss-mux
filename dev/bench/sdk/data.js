@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780187559135,
+  "lastUpdate": 1780188114002,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -479,6 +479,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 35184,
             "range": "± 751",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9981e9cbd4d5f51864991e8daac07bd4c9f69aae",
+          "message": "feat(client-rust): expose ConnectionState via watch::Receiver (#111)\n\nPer #109. The TS SDK ships `onStateChange(state)` so consumers can\ndrive UI affordances (a \"reconnecting…\" indicator, a publish-\ndisabled guard until `Ready`) off the connection lifecycle. The\nRust SDK shipped without an equivalent — consumers could only infer\nstate from operation outcomes, which makes a Tauri-style desktop\nshell unable to surface `Reconnecting` mid-blip or\n`Authenticating` during the auth-frame pre-ack window.\n\n## Surface\n\n```rust\nlet mut rx = client.state_changes();           // watch::Receiver\nwhile rx.changed().await.is_ok() {\n    let s = *rx.borrow();\n    // drive UI…\n}\n\n// Or sample without subscribing:\nlet s = client.state();                        // Copy snapshot\n```\n\n`ConnectionState` is a `Debug, Clone, Copy, Eq, Hash` enum with\nvariants matching the TS SDK's `onStateChange` vocabulary:\n`Idle, Connecting, Authenticating, Ready, Reconnecting, Closing,\nClosed`.\n\n## Why watch and not broadcast / callback\n\nPer the issue's stated preference (option b). `watch` is idiomatic\nasync Rust:\n\n- Composes natively with `tokio::select!` — Tauri IPC bridges use\n  it directly.\n- No `Send + 'static` closure ceremony.\n- The \"what's the current state right now\" sampling is free\n  (`borrow()`).\n\nThe cost is coalescing on rapid transitions: when the drive crosses\ntwo phases between two consumer polls (the `Authenticating` window\non fast loopback is sub-millisecond), the receiver reads the later\nstate when it wakes. This is the right shape for \"is it Ready or\nnot\" UI logic; it's documented in the README + on `state_changes`\nso consumers who need every step have informed expectations.\n\n## Internals\n\n- `Drive` gains a `watch::Sender<ConnectionState>` field, plus a\n  small `set_state` helper.\n- Transition sites: `connect()` brackets the auth write with\n  `Connecting → Authenticating → Ready`; the reconnect path emits\n  `Reconnecting` before backoff; the `Close` command emits\n  `Closing` before sending the close frame; terminal outcomes\n  (Closed, BadFrame, ReconnectExhausted, initial-connect-fail)\n  emit `Closed`.\n- `ClientInner` stores a `watch::Receiver<ConnectionState>` for\n  `state()` snapshots and `state_changes()` clones.\n\n## Tests\n\n`clients/rust/tests/connection_state.rs` — 4 new:\n\n- `build_lands_client_in_ready_state` — initial-connect happy path.\n- `close_transitions_to_closed` — explicit shutdown lands Closed.\n- `state_changes_yields_a_transition_on_close` — `changed().await`\n  fires; the borrowed value after the change is `Closed`.\n- `server_close_drives_reconnecting_then_back_to_ready` — transient\n  abnormal close walks through `Reconnecting` and lands back in\n  `Ready`. The \"must pass through Reconnecting\" assertion holds\n  here because the backoff sleep guarantees the drive parks long\n  enough for the receiver to observe it.\n\nSuite total: 30 pass (was 26). clippy + fmt clean.\n\n## Docs\n\n- `clients/rust/README.md` documents `state()`, `state_changes()`,\n  the enum vocabulary, and the watch-coalescing trade-off.\n- Module-level rustdoc on `ConnectionState` spells out the happy-\n  path + reconnect + close sequences.",
+          "timestamp": "2026-05-30T18:40:54-06:00",
+          "tree_id": "b1170b56c4f59fdc0a5efafa188f413d446f177a",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/9981e9cbd4d5f51864991e8daac07bd4c9f69aae"
+        },
+        "date": 1780188113101,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1160289,
+            "range": "± 37604",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11341765,
+            "range": "± 233166",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 113309112,
+            "range": "± 1457825",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 35119,
+            "range": "± 1405",
             "unit": "ns/iter"
           }
         ]
