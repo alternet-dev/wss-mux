@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780188571345,
+  "lastUpdate": 1780189408821,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -8657,6 +8657,240 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 121,
             "range": "± 0",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "331e88ede82d9b812862381b03203f37c65dfcfa",
+          "message": "chore: bump version to 0.6.2 (#112)\n\nPatch release on top of 0.6.1. Three packages move in lockstep:\n\n- `wss-mux` (server) 0.6.1 → 0.6.2\n- `wss-mux-client` (Rust SDK) 0.6.1 → 0.6.2\n- `@alternet/wss-mux-client` (TS SDK) 0.6.1 → 0.6.2\n\n## What ships\n\n- Rust SDK: `ConnectionState` observability via `state()` snapshot\n  and `state_changes()` watch::Receiver (#111). Mirrors the TS SDK's\n  `onStateChange` callback for cross-SDK parity — embedders writing\n  transport adapters that target both runtimes (e.g. a Tauri shell\n  wrapping the Rust SDK and proxying to a React webview) can surface\n  the same `Reconnecting` / `Authenticating` UI affordances on both\n  sides.\n- Embedding docs: validate-manifest CI wiring example surfaced in\n  §3 of `docs/embedding.md` (#110). Closes the discoverability gap\n  flagged by an embedder who shipped the upgrade for #104 and\n  didn't notice #105 had also landed the subcommand they would have\n  used.\n\nThe server has no source changes; the version bump is the lockstep\nhalf. The TS SDK has no source changes either.\n\n## No wire-breaking changes\n\nPatch release — all wire surfaces (envelope, manifest schema, error\ncodes, close codes, subprotocol) are byte-identical to 0.6.1. A\n0.6.1 client speaks to a 0.6.2 server and vice versa, no changes.",
+          "timestamp": "2026-05-30T18:54:50-06:00",
+          "tree_id": "cc5ea0576036f32d87a152cc7592fbe255eab0ed",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/331e88ede82d9b812862381b03203f37c65dfcfa"
+        },
+        "date": 1780189408501,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 319,
+            "range": "± 7",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1890,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3886,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 32845,
+            "range": "± 369",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 335,
+            "range": "± 5",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2436,
+            "range": "± 122",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28513,
+            "range": "± 1818",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 387672,
+            "range": "± 31082",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5304885,
+            "range": "± 386200",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 158,
+            "range": "± 440",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 138,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33821,
+            "range": "± 290",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 165,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 46,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 88,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 125,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 127,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 129,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 147,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 337,
+            "range": "± 5605",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 354,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1909,
+            "range": "± 30",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 21150,
+            "range": "± 178",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 76,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 79,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 368,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 99,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 3815,
+            "range": "± 40",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 146,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 39033,
+            "range": "± 1065",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 387133,
+            "range": "± 1931",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6886,
+            "range": "± 18",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
+            "range": "± 1",
             "unit": "ns/iter"
           }
         ]
