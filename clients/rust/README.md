@@ -103,6 +103,38 @@ if the connection has already been torn down).
 Graceful shutdown. Sends a close frame, then waits briefly for the
 drive task to exit.
 
+### `client.state() -> ConnectionState`
+
+Current lifecycle phase. Cheap snapshot — no await, no clone.
+
+### `client.state_changes() -> watch::Receiver<ConnectionState>`
+
+Drive UI affordances ("reconnecting…" spinner, publish-disabled guard
+until `Ready`, etc.) off the transition stream:
+
+```rust,no_run
+# async fn run(client: wss_mux_client::WssMuxClient) {
+let mut rx = client.state_changes();
+while rx.changed().await.is_ok() {
+    println!("state -> {:?}", *rx.borrow());
+}
+# }
+```
+
+Variants — `Idle`, `Connecting`, `Authenticating`, `Ready`,
+`Reconnecting`, `Closing`, `Closed` — match the TypeScript SDK's
+`onStateChange` callback vocabulary for parity across transports.
+
+`watch::Receiver` coalesces rapid transitions: a consumer parked on
+`changed().await` reads the *latest* state when it wakes. If the
+drive task crosses two phases between two polls (e.g. the brief
+`Authenticating` window on a fast loopback connect), the receiver
+sees only the later one. For "always Ready or not" UI logic the
+coalescing is the right behavior; for transition-stream logging
+where every step matters, sample more often or accept that the
+sequence you see may be a sparse subset of the true path. The
+sender itself emits every transition unconditionally.
+
 ## Error handling
 
 `WssMuxError::Protocol { code, message, id }` wraps server-sent error

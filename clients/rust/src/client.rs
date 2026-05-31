@@ -40,6 +40,41 @@ use crate::EventFrame;
 
 use futures_util::stream::FuturesUnordered;
 use serde_json::Value;
+use tokio::sync::watch;
+
+/// Lifecycle phase of a client's connection. Pushed by the SDK on
+/// every transition; observe via [`WssMuxClient::state_changes`] or
+/// sample with [`WssMuxClient::state`]. Variants and transition
+/// vocabulary match the TypeScript SDK's `onStateChange`.
+///
+/// Typical happy path:
+/// `Idle → Connecting → Authenticating → Ready`.
+///
+/// On a transient server-side close the drive task walks
+/// `Ready → Reconnecting → Connecting → Authenticating → Ready`.
+///
+/// On `client.close()`: `… → Closing → Closed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConnectionState {
+    /// No connection attempt has started.
+    Idle,
+    /// TCP + WebSocket upgrade in progress.
+    Connecting,
+    /// WS open; the auth frame is being / has just been written.
+    /// Auth is acked by absence — a 4401 close shortly after means
+    /// the token was rejected and the drive will transition to
+    /// `Reconnecting`.
+    Authenticating,
+    /// Connection is up and serving subscribe / publish.
+    Ready,
+    /// A close was observed; the drive is backing off before
+    /// re-connecting.
+    Reconnecting,
+    /// `client.close()` is in progress; the WS is being drained.
+    Closing,
+    /// Terminal. No further state changes will be emitted.
+    Closed,
+}
 
 /// Reconnect/backoff configuration. Defaults match the TypeScript SDK.
 #[derive(Debug, Clone)]
@@ -141,6 +176,10 @@ impl ClientBuilder {
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<Command>();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<(), WssMuxError>>();
+        // Pre-seeded at `Idle`; the drive task pushes every transition
+        // through this sender. Consumers obtain receivers via
+        // `WssMuxClient::state_changes`.
+        let (state_tx, state_rx) = watch::channel(ConnectionState::Idle);
 
         let drive = Drive {
             url,
@@ -153,6 +192,7 @@ impl ClientBuilder {
             next_sub_counter: 1,
             pending_pubs: HashMap::new(),
             next_pub_counter: 1,
+            state_tx,
         };
         let join = tokio::spawn(drive.run(ready_tx));
 
@@ -166,6 +206,7 @@ impl ClientBuilder {
             inner: Arc::new(ClientInner {
                 cmd_tx,
                 drive_join: Mutex::new(Some(join)),
+                state_rx,
             }),
         })
     }
@@ -180,12 +221,39 @@ pub struct WssMuxClient {
 struct ClientInner {
     cmd_tx: mpsc::UnboundedSender<Command>,
     drive_join: Mutex<Option<JoinHandle<()>>>,
+    state_rx: watch::Receiver<ConnectionState>,
 }
 
 impl WssMuxClient {
     /// Create a new builder.
     pub fn builder() -> ClientBuilder {
         ClientBuilder::new()
+    }
+
+    /// Current connection state. Cheap snapshot — no await, no clone.
+    /// Pair with [`Self::state_changes`] when you want to drive UI off
+    /// the transition stream.
+    pub fn state(&self) -> ConnectionState {
+        *self.inner.state_rx.borrow()
+    }
+
+    /// Returns a [`watch::Receiver`] that yields every connection-state
+    /// transition. Each call returns a fresh receiver initialized at
+    /// the current state, so awaiting `changed()` once yields the
+    /// *next* transition, not the current one. Mirrors the TS SDK's
+    /// `onStateChange` callback in idiomatic async Rust.
+    ///
+    /// ```no_run
+    /// # async fn run(client: wss_mux_client::WssMuxClient) {
+    /// let mut rx = client.state_changes();
+    /// while rx.changed().await.is_ok() {
+    ///     let s = *rx.borrow();
+    ///     println!("state -> {s:?}");
+    /// }
+    /// # }
+    /// ```
+    pub fn state_changes(&self) -> watch::Receiver<ConnectionState> {
+        self.inner.state_rx.clone()
     }
 
     /// Subscribe to events on `stream`, optionally narrowed by `key`.
@@ -360,12 +428,25 @@ struct Drive {
     /// the connection drops.
     pending_pubs: HashMap<PublishId, oneshot::Sender<Result<(), WssMuxError>>>,
     next_pub_counter: u64,
+    /// Pushes every connection-state transition out to any
+    /// `WssMuxClient::state_changes` receivers. Initialised at `Idle`
+    /// in `ClientBuilder::build`.
+    state_tx: watch::Sender<ConnectionState>,
 }
 
 /// Settle timer: yields a publish id when its settle window elapses.
 type SettleTimer = Pin<Box<dyn Future<Output = PublishId> + Send>>;
 
 impl Drive {
+    /// Push a new connection state to the watch channel. Idempotent —
+    /// `watch::Sender::send` skips no-op transitions, so callers can
+    /// emit eagerly without guarding for duplicates.
+    fn set_state(&self, s: ConnectionState) {
+        // No receivers is not an error — `client.state()` still reads
+        // the latest value from the sender's side.
+        let _ = self.state_tx.send(s);
+    }
+
     async fn run(mut self, ready: oneshot::Sender<Result<(), WssMuxError>>) {
         // Initial connect.
         let mut conn = match self.connect(true).await {
@@ -374,6 +455,7 @@ impl Drive {
                 c
             }
             Err(e) => {
+                self.set_state(ConnectionState::Closed);
                 let _ = ready.send(Err(e));
                 return;
             }
@@ -387,6 +469,7 @@ impl Drive {
             match outcome {
                 ConnectionOutcome::Closed => {
                     self.fail_all_pending_pubs(WssMuxError::Closed);
+                    self.set_state(ConnectionState::Closed);
                     break;
                 }
                 ConnectionOutcome::ClosedByServer { code, reason } => {
@@ -404,16 +487,19 @@ impl Drive {
                     if code == CLOSE_BAD_FRAME {
                         // Protocol bug on our side; don't loop reconnects.
                         self.fail_all_subs(WssMuxError::ConnectionClosed { code, reason });
+                        self.set_state(ConnectionState::Closed);
                         return;
                     }
 
                     if let Some(cap) = self.reconnect.max_attempts {
                         if reconnect_attempt >= cap {
                             self.fail_all_subs(WssMuxError::ReconnectExhausted);
+                            self.set_state(ConnectionState::Closed);
                             return;
                         }
                     }
 
+                    self.set_state(ConnectionState::Reconnecting);
                     let backoff = backoff_at(reconnect_attempt, &self.reconnect);
                     reconnect_attempt = reconnect_attempt.saturating_add(1);
                     tokio::time::sleep(backoff).await;
@@ -511,6 +597,7 @@ impl Drive {
                         }));
                     }
                     Some(Command::Close { ack }) => {
+                        self.set_state(ConnectionState::Closing);
                         // Best-effort clean close frame; ignore errors.
                         let _ = conn.ws.send(Message::Close(Some(CloseFrame {
                             code: CloseCode::Normal,
@@ -647,6 +734,7 @@ impl Drive {
     }
 
     async fn connect(&mut self, refresh_token: bool) -> Result<Connection, WssMuxError> {
+        self.set_state(ConnectionState::Connecting);
         if refresh_token || self.cached_token.is_none() {
             let token = (self.get_token)().await?;
             self.cached_token = Some(token);
@@ -676,8 +764,13 @@ impl Drive {
         let mut conn = Connection { ws };
 
         // Send auth frame. Ack-by-absence; a 4401 close arrives later if
-        // the token was rejected.
+        // the token was rejected. The transition into `Authenticating`
+        // brackets the write so consumers can drive a "verifying token"
+        // affordance even on lossless local-loopback runs where the
+        // window is sub-millisecond.
+        self.set_state(ConnectionState::Authenticating);
         send_frame(&mut conn, &ClientFrame::Auth { token }).await?;
+        self.set_state(ConnectionState::Ready);
 
         Ok(conn)
     }

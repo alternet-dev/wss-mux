@@ -35,7 +35,7 @@ mod client;
 mod error;
 mod types;
 
-pub use client::{ClientBuilder, ReconnectOptions, Subscription, WssMuxClient};
+pub use client::{ClientBuilder, ConnectionState, ReconnectOptions, Subscription, WssMuxClient};
 pub use error::WssMuxError;
 pub use types::{
     ClientFrame, ErrorCode, PublishId, ServerFrame, SubscriptionId, CLOSE_BAD_FRAME, CLOSE_NORMAL,
