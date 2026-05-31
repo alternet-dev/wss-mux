@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780127507301,
+  "lastUpdate": 1780187559135,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -431,6 +431,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 42818,
             "range": "± 1492",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "05eb2fe212c39065159ef5eb538c194dd27c876a",
+          "message": "docs(embedding): surface validate-manifest in §3 with CI wiring example (#110)\n\nPer #108. The subcommand from #105 was documented in README but never\nmentioned in `docs/embedding.md` — the canonical embedding guide. An\nembedder reading the guide end-to-end never sees it, which is exactly\nthe discoverability gap that prompted the issue (the reporter shipped\na codegen pipeline to v0.6.1 specifically to consume #104 and didn't\nrealize #105 had also landed).\n\nAdds a \"Pre-flight validation\" subsection right after the manifest\nexample in §3, showing the two-step pattern: drift check on the\ncodegen output (the embedder's existing tooling) plus\n`wss-mux validate-manifest` against the on-disk file (upstream's\nparser as the schema source of truth). Calls out the exit codes so\nCI consumers can wire the pass/fail signal straight.\n\nNo code change.",
+          "timestamp": "2026-05-30T18:31:40-06:00",
+          "tree_id": "0360264840bdce48d4a7fb6016a149f1d15ca808",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/05eb2fe212c39065159ef5eb538c194dd27c876a"
+        },
+        "date": 1780187558825,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1156716,
+            "range": "± 38750",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11298020,
+            "range": "± 242421",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 112433730,
+            "range": "± 1763575",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 35184,
+            "range": "± 751",
             "unit": "ns/iter"
           }
         ]
