@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780188114002,
+  "lastUpdate": 1780188948938,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -527,6 +527,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 35119,
             "range": "± 1405",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "331e88ede82d9b812862381b03203f37c65dfcfa",
+          "message": "chore: bump version to 0.6.2 (#112)\n\nPatch release on top of 0.6.1. Three packages move in lockstep:\n\n- `wss-mux` (server) 0.6.1 → 0.6.2\n- `wss-mux-client` (Rust SDK) 0.6.1 → 0.6.2\n- `@alternet/wss-mux-client` (TS SDK) 0.6.1 → 0.6.2\n\n## What ships\n\n- Rust SDK: `ConnectionState` observability via `state()` snapshot\n  and `state_changes()` watch::Receiver (#111). Mirrors the TS SDK's\n  `onStateChange` callback for cross-SDK parity — embedders writing\n  transport adapters that target both runtimes (e.g. a Tauri shell\n  wrapping the Rust SDK and proxying to a React webview) can surface\n  the same `Reconnecting` / `Authenticating` UI affordances on both\n  sides.\n- Embedding docs: validate-manifest CI wiring example surfaced in\n  §3 of `docs/embedding.md` (#110). Closes the discoverability gap\n  flagged by an embedder who shipped the upgrade for #104 and\n  didn't notice #105 had also landed the subcommand they would have\n  used.\n\nThe server has no source changes; the version bump is the lockstep\nhalf. The TS SDK has no source changes either.\n\n## No wire-breaking changes\n\nPatch release — all wire surfaces (envelope, manifest schema, error\ncodes, close codes, subprotocol) are byte-identical to 0.6.1. A\n0.6.1 client speaks to a 0.6.2 server and vice versa, no changes.",
+          "timestamp": "2026-05-30T18:54:50-06:00",
+          "tree_id": "cc5ea0576036f32d87a152cc7592fbe255eab0ed",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/331e88ede82d9b812862381b03203f37c65dfcfa"
+        },
+        "date": 1780188948069,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1107211,
+            "range": "± 50871",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11123180,
+            "range": "± 214886",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 112490729,
+            "range": "± 1913260",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 31420,
+            "range": "± 1220",
             "unit": "ns/iter"
           }
         ]
