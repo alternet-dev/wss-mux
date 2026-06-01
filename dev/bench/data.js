@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780189408821,
+  "lastUpdate": 1780335642306,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux benchmarks": [
@@ -8891,6 +8891,240 @@ window.BENCHMARK_DATA = {
             "name": "registry_subscribe_unsubscribe",
             "value": 136,
             "range": "± 1",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "726aeacb09810fa94a820b156c1a7e55c49210d7",
+          "message": "release: emit a clean-auditing Homebrew formula (#113)\n\n`brew test-bot --only-tap-syntax` on `alternet-dev/homebrew-tap` was\nflagging three things on the wss-mux formula we render. Fix all\nthree at the source so the next release pushes a clean file:\n\n1. **Redundant `version` line.** When the asset URL embeds the version\n   (`/v0.6.2/wss-mux-v0.6.2-…`), Homebrew infers it. The explicit\n   `version \"${VERSION}\"` line was no-op redundancy that\n   `brew audit` rejects. Drop it.\n\n2. **Non-standard SPDX license.** Homebrew wants SPDX *expressions*\n   via the `any_of:` form, not a quoted SPDX-string with `OR`. Switch\n   `license \"MIT OR Apache-2.0\"` → `license any_of: [\"MIT\", \"Apache-2.0\"]`.\n\n3. **Missing URL for Intel macOS.** We deliberately don't build an\n   Intel-Mac bottle, but `brew readall --os=all --arch=all` evaluates\n   the formula for every (OS, arch) combo and crashed with \"formula\n   requires at least a URL\" for (macos, x86_64). Two changes together\n   keep readall happy while still leaving the formula effectively\n   Apple-Silicon-only on macOS:\n\n   - add `depends_on arch: :arm64` inside `on_macos`, which aborts an\n     actual install on Intel macOS before any URL is fetched, with a\n     clear architecture-mismatch error;\n   - mirror the arm64 url/sha256 into an `on_intel` block as a stub.\n     `brew style` rejects `url` directly inside `on_macos` (only the\n     inner arch/version blocks are allowed), and that URL is never\n     actually downloaded thanks to the depends_on above — it exists\n     only to satisfy readall's per-(OS, arch) URL requirement.\n\nThe `version.to_s` interpolation in the `test` stanza keeps working\nbecause Homebrew populates `version` from the parsed URL.",
+          "timestamp": "2026-06-01T11:31:47-06:00",
+          "tree_id": "a4e80b02830e9cc5255ec9f513cb82edb2355dab",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/726aeacb09810fa94a820b156c1a7e55c49210d7"
+        },
+        "date": 1780335641901,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "cbor/encode_event_frame",
+            "value": 318,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_event_frame",
+            "value": 1989,
+            "range": "± 3",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/encode_relay_batch_32",
+            "value": 3948,
+            "range": "± 12",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "cbor/decode_relay_batch_32",
+            "value": 34103,
+            "range": "± 130",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1",
+            "value": 331,
+            "range": "± 15",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10",
+            "value": 2383,
+            "range": "± 48",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/100",
+            "value": 28727,
+            "range": "± 1800",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/1000",
+            "value": 393455,
+            "range": "± 32828",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_fanout/10000",
+            "value": 5994040,
+            "range": "± 1133931",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "dispatch_no_subscribers",
+            "value": 157,
+            "range": "± 458",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_small",
+            "value": 142,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/default_large",
+            "value": 33762,
+            "range": "± 326",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_from_value/nested_paths",
+            "value": 169,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/shallow",
+            "value": 16,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "envelope_pluck/deep",
+            "value": 45,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_hit",
+            "value": 87,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/100",
+            "value": 126,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/1000",
+            "value": 129,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_mixed/sources/10000",
+            "value": 147,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_try_take_cold_insert",
+            "value": 312,
+            "range": "± 51",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/100",
+            "value": 355,
+            "range": "± 27",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/1000",
+            "value": 1902,
+            "range": "± 149",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "per_source_sweep_idle/sources/10000",
+            "value": 21424,
+            "range": "± 682",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1",
+            "value": 75,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1",
+            "value": 78,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10",
+            "value": 351,
+            "range": "± 1",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10",
+            "value": 100,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/100",
+            "value": 2320,
+            "range": "± 8",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/100",
+            "value": 147,
+            "range": "± 0",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/1000",
+            "value": 21338,
+            "range": "± 451",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/1000",
+            "value": 738,
+            "range": "± 2",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/unkeyed/10000",
+            "value": 380745,
+            "range": "± 2754",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_matches/keyed/10000",
+            "value": 6343,
+            "range": "± 77",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "registry_subscribe_unsubscribe",
+            "value": 136,
+            "range": "± 0",
             "unit": "ns/iter"
           }
         ]
