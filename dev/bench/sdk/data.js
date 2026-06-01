@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780188948938,
+  "lastUpdate": 1780335167335,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -575,6 +575,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 31420,
             "range": "± 1220",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "167108037+evan-macgregor@users.noreply.github.com",
+            "name": "Evan MacGregor",
+            "username": "evan-macgregor"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "726aeacb09810fa94a820b156c1a7e55c49210d7",
+          "message": "release: emit a clean-auditing Homebrew formula (#113)\n\n`brew test-bot --only-tap-syntax` on `alternet-dev/homebrew-tap` was\nflagging three things on the wss-mux formula we render. Fix all\nthree at the source so the next release pushes a clean file:\n\n1. **Redundant `version` line.** When the asset URL embeds the version\n   (`/v0.6.2/wss-mux-v0.6.2-…`), Homebrew infers it. The explicit\n   `version \"${VERSION}\"` line was no-op redundancy that\n   `brew audit` rejects. Drop it.\n\n2. **Non-standard SPDX license.** Homebrew wants SPDX *expressions*\n   via the `any_of:` form, not a quoted SPDX-string with `OR`. Switch\n   `license \"MIT OR Apache-2.0\"` → `license any_of: [\"MIT\", \"Apache-2.0\"]`.\n\n3. **Missing URL for Intel macOS.** We deliberately don't build an\n   Intel-Mac bottle, but `brew readall --os=all --arch=all` evaluates\n   the formula for every (OS, arch) combo and crashed with \"formula\n   requires at least a URL\" for (macos, x86_64). Two changes together\n   keep readall happy while still leaving the formula effectively\n   Apple-Silicon-only on macOS:\n\n   - add `depends_on arch: :arm64` inside `on_macos`, which aborts an\n     actual install on Intel macOS before any URL is fetched, with a\n     clear architecture-mismatch error;\n   - mirror the arm64 url/sha256 into an `on_intel` block as a stub.\n     `brew style` rejects `url` directly inside `on_macos` (only the\n     inner arch/version blocks are allowed), and that URL is never\n     actually downloaded thanks to the depends_on above — it exists\n     only to satisfy readall's per-(OS, arch) URL requirement.\n\nThe `version.to_s` interpolation in the `test` stanza keeps working\nbecause Homebrew populates `version` from the parsed URL.",
+          "timestamp": "2026-06-01T11:31:47-06:00",
+          "tree_id": "a4e80b02830e9cc5255ec9f513cb82edb2355dab",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/726aeacb09810fa94a820b156c1a7e55c49210d7"
+        },
+        "date": 1780335166947,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1119811,
+            "range": "± 37229",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11268804,
+            "range": "± 227193",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 112085012,
+            "range": "± 1514044",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 34997,
+            "range": "± 875",
             "unit": "ns/iter"
           }
         ]
