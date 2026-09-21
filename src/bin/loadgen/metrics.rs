@@ -11,6 +11,8 @@ pub struct MetricsSnapshot {
     pub subscriptions_active: f64,
     /// `wss_mux_events_dispatched_total`, summed across `{stream=…}`.
     pub events_dispatched: f64,
+    /// `wss_mux_events_dropped_total`, summed across all reasons.
+    pub events_dropped: f64,
     /// `wss_mux_events_dropped_total{reason="overflow"}` — a full
     /// per-subscription channel.
     pub overflow_drops: f64,
@@ -42,6 +44,7 @@ impl MetricsSnapshot {
         self.connections_active += other.connections_active;
         self.subscriptions_active += other.subscriptions_active;
         self.events_dispatched += other.events_dispatched;
+        self.events_dropped += other.events_dropped;
         self.overflow_drops += other.overflow_drops;
         self.relay_events_relayed += other.relay_events_relayed;
         self.relay_sent += other.relay_sent;
@@ -57,6 +60,7 @@ impl MetricsSnapshot {
     pub fn delta(&self, before: &MetricsSnapshot) -> MetricsDelta {
         MetricsDelta {
             events_dispatched: self.events_dispatched - before.events_dispatched,
+            events_dropped: self.events_dropped - before.events_dropped,
             overflow_drops: self.overflow_drops - before.overflow_drops,
             relay_events_relayed: self.relay_events_relayed - before.relay_events_relayed,
             relay_sent: self.relay_sent - before.relay_sent,
@@ -69,6 +73,7 @@ impl MetricsSnapshot {
 #[derive(Debug)]
 pub struct MetricsDelta {
     pub events_dispatched: f64,
+    pub events_dropped: f64,
     pub overflow_drops: f64,
     pub relay_events_relayed: f64,
     pub relay_sent: f64,
@@ -104,6 +109,7 @@ fn parse(body: &str) -> MetricsSnapshot {
         connections_active: sum_series(body, "wss_mux_connections_active", None),
         subscriptions_active: sum_series(body, "wss_mux_subscriptions_active", None),
         events_dispatched: sum_series(body, "wss_mux_events_dispatched_total", None),
+        events_dropped: sum_series(body, "wss_mux_events_dropped_total", None),
         overflow_drops: sum_series(
             body,
             "wss_mux_events_dropped_total",
@@ -203,6 +209,7 @@ wss_mux_frames_rate_limited_total 23
         assert_eq!(snap.connections_active, 12.0);
         assert_eq!(snap.subscriptions_active, 12.0);
         assert_eq!(snap.events_dispatched, 500.0);
+        assert_eq!(snap.events_dropped, 10.0);
         // Only the overflow reason — the no_subscribers 7 is excluded.
         assert_eq!(snap.overflow_drops, 3.0);
         assert_eq!(snap.relay_events_relayed, 50.0);
@@ -254,6 +261,7 @@ wss_mux_frames_rate_limited_total 23
         total.accumulate(&parse(SAMPLE));
         total.accumulate(&parse(SAMPLE));
         assert_eq!(total.events_dispatched, 1000.0);
+        assert_eq!(total.events_dropped, 20.0);
         assert_eq!(total.relay_events_unwanted, 200.0);
         assert_eq!(total.frames_rate_limited, 46.0);
     }
@@ -262,16 +270,19 @@ wss_mux_frames_rate_limited_total 23
     fn delta_subtracts_counters() {
         let before = MetricsSnapshot {
             events_dispatched: 100.0,
+            events_dropped: 4.0,
             relay_events_relayed: 10.0,
             ..Default::default()
         };
         let after = MetricsSnapshot {
             events_dispatched: 350.0,
+            events_dropped: 9.0,
             relay_events_relayed: 40.0,
             ..Default::default()
         };
         let d = after.delta(&before);
         assert_eq!(d.events_dispatched, 250.0);
+        assert_eq!(d.events_dropped, 5.0);
         assert_eq!(d.relay_events_relayed, 30.0);
     }
 }

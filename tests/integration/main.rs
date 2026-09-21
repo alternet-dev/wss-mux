@@ -17,6 +17,7 @@ mod rate_limit;
 mod ready;
 mod reconnect;
 mod relay;
+mod sizing_run;
 mod sse_read;
 mod validate_manifest;
 mod wildcards;

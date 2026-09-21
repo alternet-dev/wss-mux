@@ -7,6 +7,7 @@ pub mod latency;
 pub mod payload_cap;
 pub mod rate_limit;
 pub mod reconnect_storm;
+pub mod sizing_run;
 pub mod slow_consumer;
 pub mod throughput;
 

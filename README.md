@@ -218,6 +218,21 @@ Hot-path microbenchmarks (`cargo bench`) run on every push; results are
 published and tracked over time at the
 [benchmark dashboard](https://alternet-dev.github.io/wss-mux/dev/bench/).
 
+For host-level sizing, the load harness can run the connection,
+throughput, and slow-consumer memory sweeps in one self-contained command:
+
+```bash
+cargo run --release --bin wss-mux-loadgen -- \
+  sizing-run --instance-label c7g.medium --out sizing/c7g.medium.json
+```
+
+The command isolates the server in a child process, so CPU and peak RSS exclude
+the load generator. Its one JSON document contains the measured saturation
+signals, resource recommendations, checkout commit and dirty state, build
+profile, and the complete methodology used by the run. The safety ceilings and
+workload parameters shown by `wss-mux-loadgen sizing-run --help` can be
+overridden for constrained hosts.
+
 ## Status
 
 v0.x — pre-stable. Contracts may break between minor versions until
