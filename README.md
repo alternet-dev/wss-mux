@@ -232,6 +232,12 @@ signals, resource recommendations (requests at 70% of saturation and limits at
 150%), checkout commit and dirty state, build profile, and the complete
 methodology used by the run. The safety ceilings and workload parameters shown
 by `wss-mux-loadgen sizing-run --help` can be overridden for constrained hosts.
+`saturated: true` requires observed event drops, a CPU ceiling, or a latency
+cliff. A missed event rate, failed push, or exhausted load generator alone
+stops the sweep with `saturated: false`: server capacity is still unknown.
+In that case, `saturation_point` is the last attempted workload, and resource
+recommendations describe only its observed usage; do not treat them as measured
+capacity limits. A `sweep_limit` signal likewise means no saturation was observed.
 
 ## Status
 

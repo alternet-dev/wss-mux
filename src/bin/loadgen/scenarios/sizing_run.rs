@@ -589,9 +589,7 @@ async fn connection_sweep(
             baseline_p99 = Some(observation.load.p99_latency_ms);
         }
         let terminal = !signals.is_empty();
-        let saturated = signals
-            .iter()
-            .any(|signal| signal != "load_generator_exhausted");
+        let saturated = server_saturated(&signals);
         final_report = Some(to_report(
             "connections",
             "connections",
@@ -661,9 +659,7 @@ async fn event_rate_sweep(
             baseline_p99 = Some(observation.load.p99_latency_ms);
         }
         let terminal = !signals.is_empty();
-        let saturated = signals
-            .iter()
-            .any(|signal| signal != "load_generator_exhausted");
+        let saturated = server_saturated(&signals);
         final_report = Some(to_report(
             if memory { "memory" } else { "throughput" },
             "events_per_second",
@@ -807,6 +803,17 @@ fn saturation_signals(
     signals
 }
 
+fn server_saturated(signals: &[String]) -> bool {
+    // Producer-side failures and missed rates stop the sweep, but cannot
+    // distinguish the harness's own ceiling from the server's capacity.
+    signals.iter().any(|signal| {
+        matches!(
+            signal.as_str(),
+            "events_dropped" | "cpu_pegged" | "p99_latency_cliff"
+        )
+    })
+}
+
 fn to_report(
     name: &str,
     unit: &str,
@@ -948,8 +955,16 @@ struct RusageInfoV0 {
 }
 
 #[cfg(target_os = "macos")]
+#[repr(C)]
+struct MachTimebaseInfo {
+    numer: u32,
+    denom: u32,
+}
+
+#[cfg(target_os = "macos")]
 extern "C" {
     fn proc_pid_rusage(pid: c_int, flavor: c_int, buffer: *mut RusageInfoV0) -> c_int;
+    fn mach_timebase_info(info: *mut MachTimebaseInfo) -> c_int;
 }
 
 #[cfg(target_os = "macos")]
@@ -962,8 +977,21 @@ fn process_sample(pid: u32) -> Option<ProcessSample> {
     }
     // SAFETY: proc_pid_rusage returned success and initialized `usage`.
     let usage = unsafe { usage.assume_init() };
+    let mut timebase = MaybeUninit::<MachTimebaseInfo>::uninit();
+    // SAFETY: `timebase` is a writable mach_timebase_info_data_t buffer.
+    if unsafe { mach_timebase_info(timebase.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: mach_timebase_info returned success and initialized `timebase`.
+    let timebase = unsafe { timebase.assume_init() };
+    if timebase.denom == 0 || timebase.numer == 0 {
+        return None;
+    }
+    // proc_pid_rusage CPU times use Mach absolute ticks, not nanoseconds.
+    // The timebase is not 1:1 on Apple silicon; convert before reporting seconds.
+    let cpu_ticks = usage.ri_user_time as f64 + usage.ri_system_time as f64;
     Some(ProcessSample {
-        cpu_seconds: (usage.ri_user_time + usage.ri_system_time) as f64 / 1_000_000_000.0,
+        cpu_seconds: cpu_ticks * timebase.numer as f64 / timebase.denom as f64 / 1_000_000_000.0,
         peak_rss_kib: usage.ri_resident_size.div_ceil(1024),
     })
 }
@@ -1129,6 +1157,23 @@ mod tests {
     }
 
     #[test]
+    fn missed_rate_without_server_evidence_is_not_saturation() {
+        let mut observed = observation();
+        observed.load.achieved_rate = 300.0;
+        let signals = saturation_signals(&observed, Some(4.0), 90, 2);
+        assert_eq!(signals, vec!["target_rate_missed"]);
+        assert!(!server_saturated(&signals));
+
+        observed.load.failed = 1;
+        let signals = saturation_signals(&observed, Some(4.0), 90, 2);
+        assert!(!server_saturated(&signals));
+
+        observed.load.events_dropped = 1;
+        let signals = saturation_signals(&observed, Some(4.0), 90, 2);
+        assert!(server_saturated(&signals));
+    }
+
+    #[test]
     fn recommendations_apply_published_fractions() {
         let (requests, limits) = recommendations(Usage {
             peak_cpu_percent: 100.0,
@@ -1168,5 +1213,35 @@ mod tests {
             process_sample(std::process::id()).expect("current process resources are readable");
         assert!(sample.cpu_seconds >= 0.0);
         assert!(sample.peak_rss_kib > 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn process_cpu_seconds_agree_with_mach_timebase() {
+        let pid = std::process::id();
+        let read_cpu_seconds = || {
+            let mut timebase = MaybeUninit::<MachTimebaseInfo>::uninit();
+            let mut usage = MaybeUninit::<RusageInfoV0>::uninit();
+            // SAFETY: both calls receive writable buffers of the requested ABI;
+            // success is checked before reading either initialized result.
+            unsafe {
+                assert_eq!(mach_timebase_info(timebase.as_mut_ptr()), 0);
+                assert_eq!(proc_pid_rusage(pid as c_int, 0, usage.as_mut_ptr()), 0);
+                let timebase = timebase.assume_init();
+                let usage = usage.assume_init();
+                assert_ne!(timebase.denom, 0);
+                (usage.ri_user_time as f64 + usage.ri_system_time as f64) * timebase.numer as f64
+                    / timebase.denom as f64
+                    / 1_000_000_000.0
+            }
+        };
+        let before = read_cpu_seconds();
+        let sampled = process_sample(pid).expect("current process resources are readable");
+        let after = read_cpu_seconds();
+        assert!(
+            (before..=after).contains(&sampled.cpu_seconds),
+            "sampled CPU seconds {} must be between {before} and {after}",
+            sampled.cpu_seconds
+        );
     }
 }
