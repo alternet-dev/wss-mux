@@ -228,10 +228,10 @@ cargo run --release --bin wss-mux-loadgen -- \
 
 The command isolates the server in a child process, so CPU and peak RSS exclude
 the load generator. Its one JSON document contains the measured saturation
-signals, resource recommendations, checkout commit and dirty state, build
-profile, and the complete methodology used by the run. The safety ceilings and
-workload parameters shown by `wss-mux-loadgen sizing-run --help` can be
-overridden for constrained hosts.
+signals, resource recommendations (requests at 70% of saturation and limits at
+150%), checkout commit and dirty state, build profile, and the complete
+methodology used by the run. The safety ceilings and workload parameters shown
+by `wss-mux-loadgen sizing-run --help` can be overridden for constrained hosts.
 
 ## Status
 
