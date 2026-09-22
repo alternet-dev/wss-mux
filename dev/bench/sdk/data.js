@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1780335167335,
+  "lastUpdate": 1790100955926,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -623,6 +623,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 34997,
             "range": "± 875",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "315291739+holy-metatron[bot]@users.noreply.github.com",
+            "name": "holy-metatron[bot]",
+            "username": "holy-metatron[bot]"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6ae2b045881fd176ce8fd8ade2436f256071a8fc",
+          "message": "feat(loadgen): add sizing-run harness (#114)\n\n* feat(loadgen): add reproducible sizing sweeps\n\n* ci: retrigger pull request checks\n\n* docs(loadgen): clarify sizing recommendations\n\n* Fix sizing CPU units and saturation evidence\n\nConvert macOS process CPU ticks through the Mach timebase before calculating CPU utilization. Treat an unmet producer rate or failed push without server-side drop, CPU, or latency evidence as an inconclusive sizing result.\n\nAdd regressions for native counter conversion and the saturation distinction, and document how to interpret resource recommendations when capacity remains unknown.\n\nRefs #61\n\n---------\n\nCo-authored-by: Evan MacGregor <evan@macgregor.llc>\nCo-authored-by: holy-metatron[bot] <315291739+holy-metatron[bot]@users.noreply.github.com>",
+          "timestamp": "2026-09-22T12:13:43-06:00",
+          "tree_id": "b8d1caa9ebe89c35f276ae73d3ef59506e636383",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/6ae2b045881fd176ce8fd8ade2436f256071a8fc"
+        },
+        "date": 1790100955395,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1132068,
+            "range": "± 62736",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 10976044,
+            "range": "± 203438",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 110477590,
+            "range": "± 2015595",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 42821,
+            "range": "± 1960",
             "unit": "ns/iter"
           }
         ]
