@@ -59,6 +59,20 @@ async fn main() -> Result<()> {
         }
         Scenario::PayloadCap => scenarios::payload_cap::run(&cli).await?,
         Scenario::RateLimit => scenarios::rate_limit::run(&cli).await?,
+        Scenario::SizingRun(args) => {
+            let sizing = scenarios::sizing_run::run(&cli, args).await?;
+            scenarios::sizing_run::write(&args.out, &sizing)?;
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&sizing)?);
+            } else {
+                println!("wrote sizing results to {}", args.out.display());
+            }
+            return Ok(());
+        }
+        Scenario::SizingServer { ready_file } => {
+            scenarios::sizing_run::serve(&cli, ready_file).await?;
+            return Ok(());
+        }
     };
 
     if cli.json {

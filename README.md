@@ -218,6 +218,27 @@ Hot-path microbenchmarks (`cargo bench`) run on every push; results are
 published and tracked over time at the
 [benchmark dashboard](https://alternet-dev.github.io/wss-mux/dev/bench/).
 
+For host-level sizing, the load harness can run the connection,
+throughput, and slow-consumer memory sweeps in one self-contained command:
+
+```bash
+cargo run --release --bin wss-mux-loadgen -- \
+  sizing-run --instance-label c7g.medium --out sizing/c7g.medium.json
+```
+
+The command isolates the server in a child process, so CPU and peak RSS exclude
+the load generator. Its one JSON document contains the measured saturation
+signals, resource recommendations (requests at 70% of saturation and limits at
+150%), checkout commit and dirty state, build profile, and the complete
+methodology used by the run. The safety ceilings and workload parameters shown
+by `wss-mux-loadgen sizing-run --help` can be overridden for constrained hosts.
+`saturated: true` requires observed event drops, a CPU ceiling, or a latency
+cliff. A missed event rate, failed push, or exhausted load generator alone
+stops the sweep with `saturated: false`: server capacity is still unknown.
+In that case, `saturation_point` is the last attempted workload, and resource
+recommendations describe only its observed usage; do not treat them as measured
+capacity limits. A `sweep_limit` signal likewise means no saturation was observed.
+
 ## Status
 
 v0.x — pre-stable. Contracts may break between minor versions until

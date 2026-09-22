@@ -1,6 +1,8 @@
 //! Command-line surface for the load/stress harness.
 
-use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand};
 
 use crate::topology::Topology;
 
@@ -117,4 +119,63 @@ pub enum Scenario {
     /// Rate limit: flood inbound frames past a low rate limit; confirm
     /// keep-open rate-limited errors and that admission later resumes.
     RateLimit,
+    /// Run connection, throughput, and memory sweeps and write one
+    /// machine-readable sizing result.
+    SizingRun(SizingArgs),
+    /// Internal child process used by `sizing-run` to isolate server
+    /// resource measurements from the load generator.
+    #[command(hide = true)]
+    SizingServer {
+        #[arg(long, hide = true)]
+        ready_file: PathBuf,
+    },
+}
+
+/// Reproducible sizing-sweep parameters. The defaults are the published
+/// methodology; overrides primarily support constrained hosts and smoke tests.
+#[derive(Debug, Args)]
+pub struct SizingArgs {
+    /// Human-readable machine or instance type recorded in the result.
+    #[arg(long)]
+    pub instance_label: String,
+
+    /// Destination for the complete sizing JSON document.
+    #[arg(long)]
+    pub out: PathBuf,
+
+    /// First connection count tested by the connection sweep.
+    #[arg(long, default_value_t = 100)]
+    pub connection_start: usize,
+
+    /// Safety ceiling for the connection sweep.
+    #[arg(long, default_value_t = 100_000)]
+    pub connection_max: usize,
+
+    /// Fixed event rate used while connection count increases.
+    #[arg(long, default_value_t = 100)]
+    pub connection_event_rate: u64,
+
+    /// Connection count held during throughput and memory sweeps.
+    #[arg(long, default_value_t = 100)]
+    pub fixed_connections: usize,
+
+    /// First event rate tested by throughput and memory sweeps.
+    #[arg(long, default_value_t = 100)]
+    pub event_rate_start: u64,
+
+    /// Safety ceiling for throughput and memory event rates.
+    #[arg(long, default_value_t = 1_000_000)]
+    pub event_rate_max: u64,
+
+    /// In the memory sweep, every Nth connection stops reading.
+    #[arg(long, default_value_t = 10)]
+    pub slow_every: usize,
+
+    /// Approximate event payload size used by the memory sweep.
+    #[arg(long, default_value_t = 1024)]
+    pub memory_payload_bytes: usize,
+
+    /// Percent of available CPU that marks a saturated step.
+    #[arg(long, default_value_t = 90, value_parser = clap::value_parser!(u16).range(1..=100))]
+    pub cpu_threshold_percent: u16,
 }
