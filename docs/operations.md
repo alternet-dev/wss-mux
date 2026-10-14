@@ -126,6 +126,52 @@ spec:
   single virtual IP, not the individual pods, so discovery cannot
   enumerate the fleet ⇒ no fanout.
 
+### File-descriptor limit
+
+Each accepted WebSocket consumes a file descriptor (FD). The `~100k+`
+connection figure assumes the process has a correspondingly raised
+`RLIMIT_NOFILE`; do not assume a container's default is sufficient.
+Many Linux environments start processes with a soft limit of only
+`1024` FDs.
+
+Size the limit before load testing or deploying a high-connection
+instance:
+
+```
+LimitNOFILE >= max_connections + peers + headroom
+```
+
+`peers` covers concurrent peer-relay connections. Leave headroom for
+producer requests, Prometheus scrapes, readiness and liveness probes,
+log files, DNS, and other process or runtime handles. A 100,000-client
+instance should normally set a limit above 100,000 rather than exactly
+equal to its connection target. Inspect the live soft and hard limits
+inside the process environment with `ulimit -Sn` and `ulimit -Hn`.
+
+Kubernetes `securityContext` has no field for `RLIMIT_NOFILE`; adding
+one to a Pod spec cannot raise the limit. Configure the node's
+container runtime or its service manager so the runtime launches
+containers with the required limit, then verify it inside a running
+pod. For a systemd-managed runtime or non-container service, use a
+drop-in such as:
+
+```ini
+[Service]
+LimitNOFILE=120000
+```
+
+For a direct Docker deployment, pass the same soft and hard limit when
+starting the container:
+
+```sh
+docker run --ulimit nofile=120000:120000 ghcr.io/alternet-dev/wss-mux:latest
+```
+
+For a process started directly from a shell, raise the shell's soft
+limit before `exec`-ing `wss-mux`, for example `ulimit -n 120000` when
+the hard limit permits it. Raising the process limit does not raise a
+lower limit imposed by a host, container runtime, or service manager.
+
 ### Discovery knobs
 
 All optional. The defaults are what make the manifest above
