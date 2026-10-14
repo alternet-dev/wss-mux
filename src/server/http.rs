@@ -101,18 +101,27 @@ pub async fn push_event(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
-) -> Result<StatusCode, Response> {
-    authenticate(&headers, &state.config().push_auth_token).map_err(rejection)?;
+) -> Response {
+    if let Err(error) = authenticate(&headers, &state.config().push_auth_token) {
+        return rejection(error);
+    }
     if let Some(response) = overload_response(&state) {
-        return Err(response);
+        return response;
     }
 
-    let Json(body) = body.map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid JSON body")))?;
-    let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
-        .map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid envelope")))?;
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(_) => return rejection((StatusCode::BAD_REQUEST, "invalid JSON body")),
+    };
+    let envelope = match EventEnvelope::from_value(&body, envelope_paths(state.config())) {
+        Ok(envelope) => envelope,
+        Err(_) => return rejection((StatusCode::BAD_REQUEST, "invalid envelope")),
+    };
 
-    accept_events(&state, vec![envelope], EventOrigin::Producer).map_err(rejection)?;
-    Ok(StatusCode::NO_CONTENT)
+    match accept_events(&state, vec![envelope], EventOrigin::Producer) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => rejection(error),
+    }
 }
 
 /// Batch push. The wrapper is always `{"events": [...]}`; each element is
@@ -125,28 +134,36 @@ pub async fn push_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
-) -> Result<StatusCode, Response> {
-    authenticate(&headers, &state.config().push_auth_token).map_err(rejection)?;
+) -> Response {
+    if let Err(error) = authenticate(&headers, &state.config().push_auth_token) {
+        return rejection(error);
+    }
     if let Some(response) = overload_response(&state) {
-        return Err(response);
+        return response;
     }
 
-    let Json(body) = body.map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid JSON body")))?;
-    let events = body
-        .get("events")
-        .and_then(Value::as_array)
-        .ok_or_else(|| rejection((StatusCode::BAD_REQUEST, "batch body needs an events array")))?;
+    let Json(body) = match body {
+        Ok(body) => body,
+        Err(_) => return rejection((StatusCode::BAD_REQUEST, "invalid JSON body")),
+    };
+    let Some(events) = body.get("events").and_then(Value::as_array) else {
+        return rejection((StatusCode::BAD_REQUEST, "batch body needs an events array"));
+    };
 
     let paths = envelope_paths(state.config());
     let mut parsed = Vec::with_capacity(events.len());
     for raw in events {
-        let envelope = EventEnvelope::from_value(raw, paths)
-            .map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid event in batch")))?;
+        let envelope = match EventEnvelope::from_value(raw, paths) {
+            Ok(envelope) => envelope,
+            Err(_) => return rejection((StatusCode::BAD_REQUEST, "invalid event in batch")),
+        };
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed, EventOrigin::Producer).map_err(rejection)?;
-    Ok(StatusCode::NO_CONTENT)
+    match accept_events(&state, parsed, EventOrigin::Producer) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => rejection(error),
+    }
 }
 
 fn rejection((status, message): (StatusCode, &'static str)) -> Response {
