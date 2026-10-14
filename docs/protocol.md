@@ -154,6 +154,14 @@ otherwise.
 
 ## Error codes
 
+`code` is the machine-readable error classification. The table below is
+the complete v1 taxonomy: each code string, its meaning, whether it
+closes the connection, and its `id` correlation behavior are stable
+wire contract. A server must not send an unlisted code in a v1 release.
+
+`message` is human-readable diagnostic text. Clients must use `code`,
+not `message`, for program logic; message wording is not stable.
+
 | Code | When | Closes connection? |
 |---|---|---|
 | `unknown_frame_type` | client sent an unrecognized `type` | yes |
@@ -168,9 +176,17 @@ otherwise.
 | `rate_limited` | inbound frame rate limit exceeded | no |
 | `overflow` | a subscription exceeded its send-queue depth | no |
 
-Errors that close the connection use WebSocket close code `4xxx`
-matching the error semantically (`4400` bad frame, `4401`
-unauthenticated).
+Errors that close the connection use these fixed WebSocket close codes:
+
+| Error codes | Close code |
+|---|---|
+| `unknown_frame_type`, `bad_frame` | `4400` |
+| `unauthenticated`, `expired_token` | `4401` |
+
+wss-mux reserves `4400` through `4499` for application error closes.
+Every future error close remains in that range; unassigned values have
+no defined meaning. A new assignment, or a change to an existing
+assignment, requires a major release.
 
 `rate_limited` is keep-open: the offending frame is dropped (not
 processed), an `error` frame is returned (echoing the frame's `id`
@@ -296,5 +312,7 @@ these rules:
   unknown types if marked optional.
 - **Adding a field to an existing frame**: minor version. Old
   clients ignore unknown fields.
-- **Adding a new error code**: minor version.
+- **Adding a new error code or error close-code assignment**: major
+  version. The v1 error taxonomy is closed so typed clients may model it
+  exhaustively.
 - **Changing or removing anything**: major version.
