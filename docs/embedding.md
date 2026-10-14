@@ -31,11 +31,34 @@ The push token is a shared secret configured via
 `WSS_MUX_PUSH_AUTH_TOKEN`. Rotate by changing the env var and
 restarting.
 
+### Producer identity
+
+Each external push also has an opaque producer identity for fairness
+features. Supply it with `X-Producer-Id` on both single and batch pushes:
+
+```http
+X-Producer-Id: billing-api
+```
+
+The header does not authenticate or authorize a request; the shared bearer
+token remains the injection boundary. It is intended for an
+operator-controlled producer fleet, where producers that hold that token are
+trusted not to impersonate one another. Do not use it for audit identity or
+access control.
+
+The value must be 1–128 printable ASCII characters with no whitespace.
+An omitted header resolves to the shared identity `shared`, so existing
+producers keep their current behavior and share one fairness budget when a
+future fairness feature is enabled. Invalid values return `400 Bad Request`.
+Internal peer relays are not external producer pushes and have no producer
+identity.
+
 For batch efficiency:
 
 ```http
 POST /events/batch
 Authorization: Bearer <push-token>
+X-Producer-Id: billing-api
 
 { "events": [ {...}, {...}, ... ] }
 ```

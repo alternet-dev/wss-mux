@@ -42,7 +42,10 @@ implementation.
 
 Accepts producer pushes on `POST /events` and the batched
 `POST /events/batch`. Bearer-token authenticated against a shared
-secret. Validates the event envelope, forwards to the dispatcher.
+secret. An optional `X-Producer-Id` becomes an opaque fairness key;
+absent headers resolve to one shared identity. The header does not
+authenticate a request and is not forwarded over peer relay. Validates the
+event envelope, forwards to the dispatcher.
 Stateless.
 
 `GET /events/:stream` exposes the same event stream as a

@@ -15,11 +15,13 @@ use serde_json::Value;
 use crate::auth::{audience_admits, AuthError};
 use crate::config::Config;
 use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx};
-use crate::dispatcher::{dispatch, EventOrigin};
+use crate::dispatcher::{dispatch, EventOrigin, ProducerIdentity};
 use crate::envelope::{EnvelopePaths, EventEnvelope, ServerFrame};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
 use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
+
+const PRODUCER_ID_HEADER: &str = "x-producer-id";
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let body = state.metrics().encode();
@@ -83,12 +85,12 @@ fn accept_events(
 
     // Capture the canonical batch for relay before the dispatch loop
     // consumes it (only when this is a producer push).
-    let relay_batch = (origin == EventOrigin::Producer).then(|| RelayBatch {
+    let relay_batch = origin.should_relay().then(|| RelayBatch {
         events: events.clone(),
     });
 
     for envelope in events {
-        dispatch(state, envelope, origin);
+        dispatch(state, envelope, origin.clone());
     }
 
     if let Some(batch) = relay_batch {
@@ -103,12 +105,13 @@ pub async fn push_event(
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     authenticate(&headers, &state.config().push_auth_token)?;
+    let producer = producer_identity(&headers)?;
 
     let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
     let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    accept_events(&state, vec![envelope], EventOrigin::Producer)?;
+    accept_events(&state, vec![envelope], EventOrigin::Producer(producer))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -124,6 +127,7 @@ pub async fn push_batch(
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     authenticate(&headers, &state.config().push_auth_token)?;
+    let producer = producer_identity(&headers)?;
 
     let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
     let events = body
@@ -139,7 +143,7 @@ pub async fn push_batch(
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed, EventOrigin::Producer)?;
+    accept_events(&state, parsed, EventOrigin::Producer(producer))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -387,6 +391,21 @@ fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, 
     }
 }
 
+/// Resolve the authenticated producer's opaque fairness key. The header is
+/// optional for compatibility: existing producers share the default key.
+/// Authentication deliberately happens before this parse, so the header
+/// cannot turn an unauthenticated request into a distinguishable oracle.
+fn producer_identity(headers: &HeaderMap) -> Result<ProducerIdentity, (StatusCode, &'static str)> {
+    match headers.get(PRODUCER_ID_HEADER) {
+        None => Ok(ProducerIdentity::shared()),
+        Some(value) => value
+            .to_str()
+            .ok()
+            .and_then(ProducerIdentity::declared)
+            .ok_or((StatusCode::BAD_REQUEST, "invalid producer identity")),
+    }
+}
+
 /// Constant-time byte slice comparison to avoid timing leaks on the push token.
 fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -416,5 +435,37 @@ mod tests {
     #[test]
     fn subtle_eq_rejects_different_length() {
         assert!(!subtle_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn producer_identity_defaults_to_shared() {
+        let identity = producer_identity(&HeaderMap::new()).expect("default identity");
+        assert_eq!(identity.as_str(), "shared");
+    }
+
+    #[test]
+    fn producer_identity_accepts_printable_ascii() {
+        let mut headers = HeaderMap::new();
+        headers.insert(PRODUCER_ID_HEADER, "billing-api:primary".parse().unwrap());
+
+        let identity = producer_identity(&headers).expect("declared identity");
+        assert_eq!(identity.as_str(), "billing-api:primary");
+    }
+
+    #[test]
+    fn producer_identity_rejects_whitespace_and_oversized_values() {
+        let mut whitespace = HeaderMap::new();
+        whitespace.insert(PRODUCER_ID_HEADER, "billing api".parse().unwrap());
+        assert_eq!(
+            producer_identity(&whitespace),
+            Err((StatusCode::BAD_REQUEST, "invalid producer identity"))
+        );
+
+        let mut oversized = HeaderMap::new();
+        oversized.insert(PRODUCER_ID_HEADER, "a".repeat(129).parse().unwrap());
+        assert_eq!(
+            producer_identity(&oversized),
+            Err((StatusCode::BAD_REQUEST, "invalid producer identity"))
+        );
     }
 }

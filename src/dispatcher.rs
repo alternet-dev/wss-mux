@@ -1,17 +1,61 @@
+use std::sync::Arc;
+
 use crate::connection::{Outbound, SendError};
 use crate::envelope::{EventEnvelope, ServerFrame};
 use crate::error::ProtocolError;
 use crate::server::metrics::{DropReason, DropReasonLabel, StreamLabel};
 use crate::server::AppState;
 
-/// Where an event entered the process. Producer pushes are relayed to
-/// peers; peer relay receipts are not (the one-hop guard). Used so a
-/// relayed event that matches no local subscription is metered as
-/// cross-instance waste.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Default identity for an HTTP producer that omits `X-Producer-Id`.
+pub const DEFAULT_PRODUCER_ID: &str = "shared";
+
+/// Opaque fairness identity supplied by an authenticated HTTP producer.
+///
+/// This is intentionally not an authentication principal: the shared push
+/// bearer remains the authorization boundary. It gives future fairness
+/// controls a stable key without coupling the binary to a particular token
+/// issuer or network topology.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProducerIdentity(Arc<str>);
+
+impl ProducerIdentity {
+    /// Identity used for existing producers that do not send the header.
+    pub fn shared() -> Self {
+        Self(Arc::from(DEFAULT_PRODUCER_ID))
+    }
+
+    /// Parse a declared producer identity. The wire contract accepts a
+    /// bounded, printable ASCII token so it is safe to retain as a future
+    /// in-memory fairness key.
+    pub fn declared(value: &str) -> Option<Self> {
+        const MAX_LEN: usize = 128;
+        (!value.is_empty()
+            && value.len() <= MAX_LEN
+            && value.bytes().all(|byte| byte.is_ascii_graphic()))
+        .then(|| Self(Arc::from(value)))
+    }
+
+    /// The stable value used to key producer-scoped controls.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Where an event entered the process. HTTP producer pushes and WS
+/// publishes are relayed to peers; peer relay receipts are not (the one-hop
+/// guard). Used so a relayed event that matches no local subscription is
+/// metered as cross-instance waste.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventOrigin {
-    Producer,
+    Producer(ProducerIdentity),
+    WebSocket,
     Peer,
+}
+
+impl EventOrigin {
+    pub fn should_relay(&self) -> bool {
+        !matches!(self, Self::Peer)
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +245,11 @@ mod tests {
     #[test]
     fn no_subscribers_increments_dropped_metric() {
         let state = AppState::new(test_config(8));
-        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+        let stats = dispatch(
+            &state,
+            env("chat_messages"),
+            EventOrigin::Producer(ProducerIdentity::shared()),
+        );
         assert_eq!(stats.delivered, 0);
         let body = state.metrics().encode();
         assert!(
@@ -224,7 +272,11 @@ mod tests {
     #[test]
     fn producer_origin_no_subscribers_does_not_count_as_unwanted() {
         let state = AppState::new(test_config(8));
-        let _ = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+        let _ = dispatch(
+            &state,
+            env("chat_messages"),
+            EventOrigin::Producer(ProducerIdentity::shared()),
+        );
         let body = state.metrics().encode();
         assert!(
             !body.contains("wss_mux_relay_events_unwanted_total 1"),
@@ -244,7 +296,7 @@ mod tests {
                 key: None,
                 payload: json!({"hello": "world"}),
             },
-            EventOrigin::Producer,
+            EventOrigin::Producer(ProducerIdentity::shared()),
         );
 
         assert_eq!(stats.delivered, 1);
@@ -262,7 +314,11 @@ mod tests {
         let rx = subscribe(&state, 7, "s1", "chat_messages", 8);
         drop(rx); // writer side gone
 
-        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+        let stats = dispatch(
+            &state,
+            env("chat_messages"),
+            EventOrigin::Producer(ProducerIdentity::shared()),
+        );
         assert_eq!(stats.dropped_closed, 1);
         // Stale sender pruned; binding cleaned.
         assert!(state.sub_sender(7, "s1").is_none());
@@ -282,10 +338,18 @@ mod tests {
         let mut rx2 = subscribe(&state, 1, "s2", "other", 8);
 
         for _ in 0..2 {
-            dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+            dispatch(
+                &state,
+                env("chat_messages"),
+                EventOrigin::Producer(ProducerIdentity::shared()),
+            );
         }
         // 3rd: s1 channel is full → per-sub overflow.
-        let stats = dispatch(&state, env("chat_messages"), EventOrigin::Producer);
+        let stats = dispatch(
+            &state,
+            env("chat_messages"),
+            EventOrigin::Producer(ProducerIdentity::shared()),
+        );
         assert_eq!(stats.dropped_full, 1);
         assert_eq!(stats.delivered, 0);
 
@@ -293,7 +357,11 @@ mod tests {
         assert!(state.control_sender(1).is_some());
         assert!(state.sub_sender(1, "s1").is_none());
         assert!(state.registry().matches("chat_messages", None).is_empty());
-        dispatch(&state, env("other"), EventOrigin::Producer);
+        dispatch(
+            &state,
+            env("other"),
+            EventOrigin::Producer(ProducerIdentity::shared()),
+        );
         assert_eq!(rx2.try_drain().len(), 1, "s2 keeps delivering");
 
         // Client got a keep-open overflow error for s1 on the control
@@ -319,7 +387,7 @@ mod tests {
                     key: None,
                     payload: json!({ "i": i }),
                 },
-                EventOrigin::Producer,
+                EventOrigin::Producer(ProducerIdentity::shared()),
             );
             assert_eq!(s.delivered, 1);
             assert_eq!(s.dropped_full, 0);

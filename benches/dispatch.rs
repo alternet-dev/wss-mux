@@ -27,7 +27,7 @@ fn bench_dispatch(c: &mut Criterion) {
                     }
                     envelope.clone()
                 },
-                |env| dispatch(black_box(&state), env, EventOrigin::Producer),
+                |env| dispatch(black_box(&state), env, EventOrigin::WebSocket),
                 BatchSize::PerIteration,
             );
         });
@@ -40,7 +40,7 @@ fn bench_dispatch(c: &mut Criterion) {
         let envelope = common::event("unsubscribed_stream");
         b.iter_batched(
             || envelope.clone(),
-            |env| dispatch(black_box(&state), env, EventOrigin::Producer),
+            |env| dispatch(black_box(&state), env, EventOrigin::WebSocket),
             BatchSize::SmallInput,
         );
     });
