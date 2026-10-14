@@ -198,6 +198,33 @@ unbounded — no `overflow` is ever emitted, at the cost of the
 per-connection memory bound (a stalled client can OOM the instance).
 See `docs/embedding.md`.
 
+## HTTP producer overload response
+
+`POST /events` and `POST /events/batch` normally return `204 No
+Content` after accepting an authenticated producer request. The
+process-wide producer overload limiter is disabled by default. When an
+operator enables it and its token bucket is empty, either endpoint
+returns:
+
+```http
+503 Service Unavailable
+Retry-After: <whole seconds>
+Connection: close
+
+overloaded
+```
+
+The request is rejected before envelope validation and dispatch: no
+event from it reaches local subscribers or peer relay. `Retry-After`
+is the ceiling of the time until one request token refills. `Connection:
+close` asks HTTP/1.1 clients to release a keep-alive connection so a
+retry can select another pod. The limiter applies only after producer
+bearer authentication succeeds and does not apply to the internal
+one-hop peer relay receipt endpoint.
+
+This is an explicit operator opt-in. With the limiter disabled, no
+overload response, extra headers, or producer-side rate gate exists.
+
 ## Connection lifecycle
 
 ```

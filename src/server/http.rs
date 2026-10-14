@@ -6,7 +6,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use futures_util::Stream;
 use serde::Deserialize;
@@ -101,14 +101,17 @@ pub async fn push_event(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
-) -> Result<StatusCode, (StatusCode, &'static str)> {
-    authenticate(&headers, &state.config().push_auth_token)?;
+) -> Result<StatusCode, Response> {
+    authenticate(&headers, &state.config().push_auth_token).map_err(rejection)?;
+    if let Some(response) = overload_response(&state) {
+        return Err(response);
+    }
 
-    let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
+    let Json(body) = body.map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid JSON body")))?;
     let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
-        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
+        .map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid envelope")))?;
 
-    accept_events(&state, vec![envelope], EventOrigin::Producer)?;
+    accept_events(&state, vec![envelope], EventOrigin::Producer).map_err(rejection)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -122,25 +125,53 @@ pub async fn push_batch(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Result<Json<Value>, axum::extract::rejection::JsonRejection>,
-) -> Result<StatusCode, (StatusCode, &'static str)> {
-    authenticate(&headers, &state.config().push_auth_token)?;
+) -> Result<StatusCode, Response> {
+    authenticate(&headers, &state.config().push_auth_token).map_err(rejection)?;
+    if let Some(response) = overload_response(&state) {
+        return Err(response);
+    }
 
-    let Json(body) = body.map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON body"))?;
+    let Json(body) = body.map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid JSON body")))?;
     let events = body
         .get("events")
         .and_then(Value::as_array)
-        .ok_or((StatusCode::BAD_REQUEST, "batch body needs an events array"))?;
+        .ok_or_else(|| rejection((StatusCode::BAD_REQUEST, "batch body needs an events array")))?;
 
     let paths = envelope_paths(state.config());
     let mut parsed = Vec::with_capacity(events.len());
     for raw in events {
         let envelope = EventEnvelope::from_value(raw, paths)
-            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid event in batch"))?;
+            .map_err(|_| rejection((StatusCode::BAD_REQUEST, "invalid event in batch")))?;
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed, EventOrigin::Producer)?;
+    accept_events(&state, parsed, EventOrigin::Producer).map_err(rejection)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+fn rejection((status, message): (StatusCode, &'static str)) -> Response {
+    (status, message).into_response()
+}
+
+/// Reject an authenticated producer request before envelope validation or
+/// dispatch when the explicitly-configured process-wide bucket is empty.
+/// Relay receipts deliberately do not call this: peer delivery is an internal
+/// best-effort path, not producer ingress.
+fn overload_response(state: &AppState) -> Option<Response> {
+    let limiter = state.push_overload_limiter()?;
+    let retry_after = limiter.try_take(std::time::Instant::now()).err()?;
+    state.metrics().push_overload_rejected.inc();
+    Some(
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [
+                (header::RETRY_AFTER, retry_after.as_secs().to_string()),
+                (header::CONNECTION, "close".to_string()),
+            ],
+            "overloaded",
+        )
+            .into_response(),
+    )
 }
 
 /// Peer relay receipt. The body is a CBOR-encoded [`RelayBatch`] of

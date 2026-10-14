@@ -22,7 +22,7 @@ use crate::config::Config;
 use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
-use crate::ratelimit::PerSourceRateLimiter;
+use crate::ratelimit::{PerSourceRateLimiter, PushOverloadLimiter};
 use crate::registry::Registry;
 use crate::server::relay::RelayBatch;
 
@@ -80,6 +80,9 @@ struct Inner {
     // publish limiting (byte-identical pre-feature behaviour). The
     // idle-eviction sweep is spawned at startup when this is `Some`.
     ws_publish_limiter: Option<Arc<PerSourceRateLimiter>>,
+    // One process-wide bucket for opt-in HTTP producer overload signaling.
+    // `None` when disabled, which leaves the pre-feature push path intact.
+    push_overload_limiter: Option<Arc<PushOverloadLimiter>>,
 }
 
 impl AppState {
@@ -119,6 +122,12 @@ impl AppState {
                 config.ws_publish_idle_ttl,
             ))
         });
+        let push_overload_limiter = (config.push_overload_rate_per_sec > 0).then(|| {
+            Arc::new(PushOverloadLimiter::new(
+                config.push_overload_burst,
+                config.push_overload_rate_per_sec,
+            ))
+        });
         Ok(Self {
             inner: Arc::new(Inner {
                 config,
@@ -136,6 +145,7 @@ impl AppState {
                 relay_tx,
                 relay_rx,
                 ws_publish_limiter,
+                push_overload_limiter,
             }),
         })
     }
@@ -160,6 +170,13 @@ impl AppState {
     /// idle-eviction task at startup.
     pub fn ws_publish_limiter(&self) -> Option<&Arc<PerSourceRateLimiter>> {
         self.inner.ws_publish_limiter.as_ref()
+    }
+
+    /// Process-wide HTTP producer overload limiter. `None` means the
+    /// operator has not opted in, so producer pushes retain their original
+    /// non-blocking response behavior.
+    pub fn push_overload_limiter(&self) -> Option<&Arc<PushOverloadLimiter>> {
+        self.inner.push_overload_limiter.as_ref()
     }
 
     /// Current manifest snapshot. The returned `Arc` is independent of any
