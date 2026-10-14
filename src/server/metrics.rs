@@ -146,6 +146,11 @@ pub struct Metrics {
     pub relay_flushes: Counter,
     /// Events handed to the peer-relay path (enqueued or direct).
     pub relay_events_relayed: Counter,
+    /// Per-peer event deliveries suppressed by a known empty or
+    /// non-matching selective-relay interest snapshot.
+    pub relay_events_skipped: Counter,
+    /// Per-peer interest refresh attempts, labeled by result.
+    pub relay_interest_refresh: Family<ReloadResultLabel, Counter>,
     /// Current depth of the relay coalescing queue.
     pub relay_queue_depth: Gauge,
     /// Relay batches dropped because the coalescing queue was full.
@@ -178,6 +183,8 @@ impl Default for Metrics {
         let relay_events_unwanted = Counter::default();
         let relay_flushes = Counter::default();
         let relay_events_relayed = Counter::default();
+        let relay_events_skipped = Counter::default();
+        let relay_interest_refresh = Family::<ReloadResultLabel, Counter>::default();
         let relay_queue_depth = Gauge::default();
         let relay_queue_dropped = Counter::default();
         let relay_failed = Family::<RelayFailureLabel, Counter>::default();
@@ -257,6 +264,16 @@ impl Default for Metrics {
             relay_events_relayed.clone(),
         );
         registry.register(
+            "wss_mux_relay_events_skipped",
+            "Per-peer event deliveries skipped by selective relay",
+            relay_events_skipped.clone(),
+        );
+        registry.register(
+            "wss_mux_relay_interest_refresh",
+            "Per-peer selective-relay interest refresh attempts, labeled by result",
+            relay_interest_refresh.clone(),
+        );
+        registry.register(
             "wss_mux_relay_queue_depth",
             "Current depth of the relay coalescing queue",
             relay_queue_depth.clone(),
@@ -308,6 +325,8 @@ impl Default for Metrics {
             relay_events_unwanted,
             relay_flushes,
             relay_events_relayed,
+            relay_events_skipped,
+            relay_interest_refresh,
             relay_queue_depth,
             relay_queue_dropped,
             relay_failed,
@@ -337,12 +356,20 @@ mod tests {
         let m = Metrics::default();
         m.relay_flushes.inc();
         m.relay_events_relayed.inc_by(3);
+        m.relay_events_skipped.inc_by(2);
+        m.relay_interest_refresh
+            .get_or_create(&ReloadResultLabel {
+                result: ReloadResult::Ok,
+            })
+            .inc();
         m.relay_queue_depth.set(7);
         m.relay_queue_dropped.inc();
         let body = m.encode();
         for needle in [
             "wss_mux_relay_flushes_total 1",
             "wss_mux_relay_events_relayed_total 3",
+            "wss_mux_relay_events_skipped_total 2",
+            "wss_mux_relay_interest_refresh_total{result=\"ok\"} 1",
             "wss_mux_relay_queue_depth 7",
             "wss_mux_relay_queue_dropped_total 1",
         ] {
