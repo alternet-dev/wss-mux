@@ -329,12 +329,12 @@ event is wanted only when its key appears in `keys`; a keyless event is
 not wanted by key-specific subscriptions. Advertisements contain no
 connection IDs, subscriber identities, or subscription counts.
 
-The key set is bounded. If a stream exceeds the bound, its advertisement
-uses `all_keys: true`, deliberately allowing extra relay traffic instead
-of dropping a potentially wanted event. Missing, invalid, unauthorized,
-or unreachable interest responses are also treated as unknown and fail
-open to unconditional relay. This makes rolling upgrades and temporary
-coordination failures delivery-safe.
+The key set is bounded at 4,096 distinct keys per stream. If a stream
+exceeds the bound, its advertisement uses `all_keys: true`, deliberately
+allowing extra relay traffic instead of dropping a potentially wanted
+event. Missing, invalid, unauthorized, or unreachable interest responses
+are also treated as unknown and fail open to unconditional relay. This
+makes rolling upgrades and temporary coordination failures delivery-safe.
 
 Interest is refreshed on `WSS_MUX_PEER_DNS_REFRESH_SECS`. A new
 subscription can therefore take up to one refresh interval to become

@@ -37,7 +37,9 @@ producer --push--> instance A --relay(once)--> instance B, C, ...
 1. A producer `POST`s to any instance (`POST /events`), unchanged.
 2. That instance dispatches to its own subscribers **and** relays the
    event once to every discovered peer (`POST /internal/relay`,
-   CBOR, authenticated with the same `WSS_MUX_PUSH_AUTH_TOKEN`).
+   CBOR, authenticated with the same `WSS_MUX_PUSH_AUTH_TOKEN`). A
+   stream explicitly configured for selective relay may skip peers
+   whose current advertisement has no matching interest.
 3. Each peer dispatches to *its* own subscribers and does **not**
    re-relay. The distinct receipt path is a structural one-hop guard —
    there is no gossip, no multi-hop, no loop.
@@ -227,6 +229,59 @@ flatlines — the operator-visible signal. Watch
 events have no local subscriber (stream-sparse fleet) and selective
 relay would help.
 
+### Selective relay (opt-in)
+
+Unconditional broadcast is still the default and is the right choice
+for balanced streams: it has no coordination window and often has near
+zero waste. Enable selective relay only on a stream whose measured fleet
+topology shows sustained unwanted relay traffic:
+
+```yaml
+version: 1
+streams:
+  - stream: tenant_events
+    subscribe: [tenant:*]
+    selective_relay: true
+```
+
+There is no automatic toggle. The operator chooses after observing
+`wss_mux_relay_events_unwanted_total` divided by
+`wss_mux_relay_events_relayed_total`; absent or `false` keeps the
+pre-feature broadcast path.
+
+For requested selective streams, every peer advertises aggregate local
+interest as either all keys or a set of exact keys. Advertisements carry
+no connection IDs, subscription IDs, subscriber identities, or counts.
+A keyless subscription advertises all keys. More than 4,096 distinct
+keys on one stream also collapses to all keys, bounding snapshot memory
+while allowing extra traffic instead of risking a missed wanted event.
+
+Senders refresh advertisements on `WSS_MUX_PEER_DNS_REFRESH_SECS`
+(default 3 seconds). DNS fleets combine membership and interest refresh;
+static `WSS_MUX_PEERS` fleets skip DNS but still refresh interest on the
+same cadence. Filtering happens per peer after relay coalescing, so one
+coalesced input batch can become different smaller batches for different
+peers.
+
+The freshness tradeoff is explicit:
+
+- A new subscription may take up to one refresh interval to appear in
+  peer interest and can miss events in that window.
+- An unsubscribe may leave stale interest for the same interval, causing
+  only extra relay traffic.
+- A missing, invalid, unauthorized, or unreachable interest response is
+  treated as unknown and fails open to unconditional relay. This keeps
+  rolling upgrades and coordination failures delivery-safe.
+
+`wss_mux_relay_events_skipped_total` counts event-peer deliveries omitted
+by selective relay. Compare its growth with the unwanted-event ratio to
+confirm that the chosen streams benefit. A stream with frequent new
+subscriptions and strict first-event delivery should remain on
+unconditional broadcast even when its waste ratio is high.
+`wss_mux_relay_interest_refresh_total{result="error"}` counts peers whose
+latest advertisement could not be used and therefore fell back to
+broadcast.
+
 ## Non-Kubernetes / fixed fleet
 
 No DNS, fixed hosts (bare metal, Compose, a static VM set): list peers
@@ -238,7 +293,9 @@ WSS_MUX_PEERS=http://10.0.0.11:8080,http://10.0.0.12:8080
 
 Each instance lists the *others* (its own address, if included, is
 auto-excluded). The same `WSS_MUX_PUSH_AUTH_TOKEN` must be shared
-across the fleet.
+across the fleet. Static membership is never DNS-polled; when selective
+relay is enabled, aggregate interest is still refreshed on
+`WSS_MUX_PEER_DNS_REFRESH_SECS`.
 
 ## Why peer-relay and not Redis
 
@@ -270,6 +327,8 @@ Scrape `GET /metrics` (Prometheus/OpenMetrics). Peer-relay signals:
 | `wss_mux_peers_known` (gauge) | ≈ replicas − 1 on every pod | `0` (or far below N−1) in a multi-instance deploy |
 | `wss_mux_relay_sent_total` | rising with producer traffic | flat while events flow and peers exist |
 | `wss_mux_relay_failed_total{reason}` | ~0 steady state; brief blips on scale-down | sustained/climbing outside a scale event |
+| `wss_mux_relay_events_skipped_total` | rises only for intentionally selective streams | flat despite high unwanted-event ratio, or rising on a stream that should broadcast |
+| `wss_mux_relay_interest_refresh_total{result="error"}` | ~0 steady state; brief blips during mixed-version rollout | sustained/climbing means selective relay is failing open to broadcast |
 | `wss_mux_events_rejected_total{reason="payload_too_large"}` | 0 | rising — producers exceeding a stream's `max_payload_bytes` |
 
 `reason` on relay failure is `timeout`, `connect`, `status`, or
@@ -289,6 +348,8 @@ skew); `timeout` means peers are overloaded or
 | `…{reason="timeout"}` sustained | Peers overloaded; or timeout too tight | Scale out; raise `WSS_MUX_PEER_RELAY_TIMEOUT_MS` |
 | All relays fail right after enabling TLS | Bad CA / client cert path or PEM | Check `WSS_MUX_PEER_CA_FILE` / `_CLIENT_CERT` / `_KEY`; startup also logs this |
 | Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; bounded by the refresh interval |
+| Selective stream still broadcasts to every peer | Interest endpoint unavailable/invalid, or peer running an older version; filtering fails open | Check peer reachability and shared push-token consistency; allow one refresh interval after rollout |
+| Newly subscribed peer misses the first selective events | Interest advertisement has not refreshed yet | Keep this stream on unconditional broadcast if the first-event window is unacceptable; otherwise lower `WSS_MUX_PEER_DNS_REFRESH_SECS` |
 | Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/ready`), or the client side |
 | `413` from `POST /events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
 | Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/relay`; it is internal-only |

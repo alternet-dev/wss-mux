@@ -196,7 +196,11 @@ Operational notes:
   to discovered peers so every subscriber sees it, with zero new
   infrastructure. Active by default, inert with no resolvable peers
   (byte-identical to single-instance). The conventional Kubernetes
-  deploy needs no peer configuration at all.
+  deploy needs no peer configuration at all. Streams with sparse peer
+  interest can opt into `selective_relay: true` in the manifest; the
+  default remains unconditional broadcast. See
+  [docs/operations.md](docs/operations.md#selective-relay-opt-in) for
+  the data gate and staleness tradeoff.
 
 The envelope-path and rate-limit knobs are detailed in
 [docs/embedding.md](docs/embedding.md); running multiple instances is
