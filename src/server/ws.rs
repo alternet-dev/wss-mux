@@ -554,7 +554,7 @@ async fn reader_loop(
                     key,
                     payload,
                 };
-                dispatch(state, envelope.clone(), EventOrigin::WebSocket);
+                dispatch(state, envelope.clone(), EventOrigin::Producer);
                 spawn_relay(
                     state,
                     RelayBatch {

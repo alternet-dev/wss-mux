@@ -23,6 +23,29 @@ use crate::server::AppState;
 
 const PRODUCER_ID_HEADER: &str = "x-producer-id";
 
+/// HTTP event ingress metadata. Producer identity stays separate from
+/// `EventOrigin`, whose public unit variants predate this wire addition.
+enum HttpEventSource {
+    Producer(ProducerIdentity),
+    Peer,
+}
+
+impl HttpEventSource {
+    fn producer_identity(&self) -> Option<&ProducerIdentity> {
+        match self {
+            Self::Producer(identity) => Some(identity),
+            Self::Peer => None,
+        }
+    }
+
+    fn event_origin(&self) -> EventOrigin {
+        match self {
+            Self::Producer(_) => EventOrigin::Producer,
+            Self::Peer => EventOrigin::Peer,
+        }
+    }
+}
+
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let body = state.metrics().encode();
     (
@@ -51,7 +74,7 @@ fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
 fn accept_events(
     state: &AppState,
     events: Vec<EventEnvelope>,
-    origin: EventOrigin,
+    source: HttpEventSource,
 ) -> Result<(), (StatusCode, &'static str)> {
     let manifest = state
         .manifest()
@@ -85,12 +108,13 @@ fn accept_events(
 
     // Capture the canonical batch for relay before the dispatch loop
     // consumes it (only when this is a producer push).
-    let relay_batch = origin.should_relay().then(|| RelayBatch {
+    let relay_batch = source.producer_identity().map(|_| RelayBatch {
         events: events.clone(),
     });
+    let origin = source.event_origin();
 
     for envelope in events {
-        dispatch(state, envelope, origin.clone());
+        dispatch(state, envelope, origin);
     }
 
     if let Some(batch) = relay_batch {
@@ -111,7 +135,7 @@ pub async fn push_event(
     let envelope = EventEnvelope::from_value(&body, envelope_paths(state.config()))
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid envelope"))?;
 
-    accept_events(&state, vec![envelope], EventOrigin::Producer(producer))?;
+    accept_events(&state, vec![envelope], HttpEventSource::Producer(producer))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -143,7 +167,7 @@ pub async fn push_batch(
         parsed.push(envelope);
     }
 
-    accept_events(&state, parsed, EventOrigin::Producer(producer))?;
+    accept_events(&state, parsed, HttpEventSource::Producer(producer))?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -163,7 +187,7 @@ pub async fn relay_receive(
     let batch: RelayBatch = ciborium::from_reader(body.as_ref())
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR relay body"))?;
 
-    accept_events(&state, batch.events, EventOrigin::Peer)?;
+    accept_events(&state, batch.events, HttpEventSource::Peer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

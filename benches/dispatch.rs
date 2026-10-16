@@ -2,7 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 
-use wss_mux::dispatcher::{dispatch, EventOrigin, ProducerIdentity};
+use wss_mux::dispatcher::{dispatch, EventOrigin};
 use wss_mux::server::AppState;
 
 #[path = "common/mod.rs"]
@@ -18,7 +18,6 @@ fn bench_dispatch(c: &mut Criterion) {
             // (which would mutate the registry mid-measurement).
             let (state, mut handles) = common::state_with_subs("bench_stream", n, 64, false);
             let envelope = common::event("bench_stream");
-            let origin = EventOrigin::Producer(ProducerIdentity::shared());
             b.iter_batched(
                 || {
                     // Untimed: drain receivers + clone the envelope so
@@ -28,7 +27,7 @@ fn bench_dispatch(c: &mut Criterion) {
                     }
                     envelope.clone()
                 },
-                |env| dispatch(black_box(&state), env, origin.clone()),
+                |env| dispatch(black_box(&state), env, EventOrigin::Producer),
                 BatchSize::PerIteration,
             );
         });
@@ -39,10 +38,9 @@ fn bench_dispatch(c: &mut Criterion) {
     c.bench_function("dispatch_no_subscribers", |b| {
         let state = AppState::new(common::bench_config(64));
         let envelope = common::event("unsubscribed_stream");
-        let origin = EventOrigin::Producer(ProducerIdentity::shared());
         b.iter_batched(
             || envelope.clone(),
-            |env| dispatch(black_box(&state), env, origin.clone()),
+            |env| dispatch(black_box(&state), env, EventOrigin::Producer),
             BatchSize::SmallInput,
         );
     });

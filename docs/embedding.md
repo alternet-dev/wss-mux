@@ -49,7 +49,10 @@ access control.
 The value must be 1–128 printable ASCII characters with no whitespace.
 An omitted header resolves to the shared identity `shared`, so existing
 producers keep their current behavior and share one fairness budget when a
-future fairness feature is enabled. Invalid values return `400 Bad Request`.
+future fairness feature is enabled. For authenticated requests, invalid values
+return `400 Bad Request`. Header validation runs after bearer authentication,
+so a request with missing or invalid credentials returns `401 Unauthorized`
+regardless of the header.
 Internal peer relays are not external producer pushes and have no producer
 identity.
 
