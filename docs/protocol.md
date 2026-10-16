@@ -191,7 +191,8 @@ otherwise.
 `code` is the machine-readable error classification. The table below is
 the complete v1 taxonomy: each code string, its meaning, whether it
 closes the connection, and its `id` correlation behavior are stable
-wire contract. A server must not send an unlisted code in a v1 release.
+parts of the wire contract. A server must not send an unlisted code in a
+v1 release.
 
 `message` is human-readable diagnostic text. Clients must use `code`,
 not `message`, for program logic; message wording is not stable.
