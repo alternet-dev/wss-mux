@@ -217,13 +217,32 @@ WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
   work: tokens still carry the public `iss` (and `wss-mux` validates
   against that), but discovery — and the `jwks_uri` it returns —
   resolves to an in-cluster address that never leaves the cluster.
-- **Resilience.** The JWKS is fetched at startup and refreshed every
-  `WSS_MUX_OIDC_JWKS_REFRESH` seconds; a failed refresh is logged +
-  metered (`wss_mux_oidc_jwks_refresh`) and keeps the last-good cache,
-  so an IdP blip does not 401 every client. Until the *first*
-  successful fetch, `/ready` returns 503 (`wss_mux_oidc_jwks_keys`
-  gauge stays 0) so the pod is kept out of rotation rather than
-  rejecting everyone.
+- **Rotation and resilience.** The full JWKS is fetched at startup, then
+  after each fetch attempt the process waits
+  `WSS_MUX_OIDC_JWKS_REFRESH` seconds before trying again. A successful
+  response atomically replaces the cache; a failed response retains the
+  last-good cache without a TTL. Until the *first* successful fetch,
+  `/ready` returns 503 (`wss_mux_oidc_jwks_keys` gauge stays 0) so the pod
+  is kept out of rotation rather than rejecting everyone. The precise
+  auth-frame contract, including multi-key validation and key-removal
+  behavior, is in `docs/protocol.md`.
+
+#### Rotating an OIDC signing key
+
+1. Publish the new JWK alongside the old JWK, with a distinct `kid` for
+   each key.
+2. Confirm every `wss-mux` instance has refreshed successfully before
+   issuing tokens signed by the new key. Use
+   `wss_mux_oidc_jwks_refresh{result="ok"}` and
+   `wss_mux_oidc_jwks_keys` to observe refreshes and cached key counts.
+3. After the old tokens can no longer be presented for a new `auth` frame,
+   remove the old JWK. The first successful refresh that omits it rejects
+   that `kid` for future auth on that instance.
+
+The refresh interval is not a maximum retirement deadline: failed fetches
+keep the last-good key set indefinitely, and instances refresh separately.
+Key removal also does not disconnect clients already authenticated with an
+old key; `wss-mux` validates a token only when it receives `auth`.
 
 `wss-mux` never contacts the IdP per request — only the periodic JWKS
 poll — and adds no new dependency to do it.
