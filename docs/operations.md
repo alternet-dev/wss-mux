@@ -130,6 +130,52 @@ spec:
   single virtual IP, not the individual pods, so discovery cannot
   enumerate the fleet ⇒ no fanout.
 
+### File-descriptor limit
+
+Each accepted WebSocket consumes a file descriptor (FD). The `~100k+`
+connection figure assumes the process has a correspondingly raised
+`RLIMIT_NOFILE`; do not assume a container's default is sufficient.
+Many Linux environments start processes with a soft limit of only
+`1024` FDs.
+
+Size the limit before load testing or deploying a high-connection
+instance:
+
+```
+LimitNOFILE >= max_connections + peers + headroom
+```
+
+`peers` covers concurrent peer-relay connections. Leave headroom for
+producer requests, Prometheus scrapes, readiness and liveness probes,
+log files, DNS, and other process or runtime handles. A 100,000-client
+instance should normally set a limit above 100,000 rather than exactly
+equal to its connection target. Inspect the live soft and hard limits
+inside the process environment with `ulimit -Sn` and `ulimit -Hn`.
+
+Kubernetes `securityContext` has no field for `RLIMIT_NOFILE`; adding
+one to a Pod spec cannot raise the limit. Configure the node's
+container runtime or its service manager so the runtime launches
+containers with the required limit, then verify it inside a running
+pod. For a systemd-managed runtime or non-container service, use a
+drop-in such as:
+
+```ini
+[Service]
+LimitNOFILE=120000
+```
+
+For a direct Docker deployment, pass the same soft and hard limit when
+starting the container:
+
+```sh
+docker run --ulimit nofile=120000:120000 ghcr.io/alternet-dev/wss-mux:latest
+```
+
+For a process started directly from a shell, raise the shell's soft
+limit before `exec`-ing `wss-mux`, for example `ulimit -n 120000` when
+the hard limit permits it. Raising the process limit does not raise a
+lower limit imposed by a host, container runtime, or service manager.
+
 ### Discovery knobs
 
 All optional. The defaults are what make the manifest above
@@ -174,6 +220,88 @@ With the conventional `wss-mux-headless` Service, autoscaling works
 out of the box: a new pod becomes a DNS A record once Ready, every
 instance picks it up within `WSS_MUX_PEER_DNS_REFRESH_SECS`, and it
 both relays to and receives relays from the rest of the fleet.
+
+### Recommended target: active connections
+
+Use `wss_mux_connections_active` as the primary HPA signal. It is a
+per-pod gauge of currently open WebSocket connections, so it reflects
+connection bursts before an IO-bound mux necessarily uses enough CPU to
+trigger a CPU-based HPA. Expose the gauge through a custom-metrics adapter
+(for example, Prometheus Adapter) as a `Pods` metric. The adapter must retain
+the Prometheus scrape target's `namespace` and `pod` labels so Kubernetes can
+associate each sample with its pod.
+
+This recipe starts at 10,000 connections per pod, keeps three replicas for
+availability, permits a fleet of up to 20, and uses a five-minute scale-down
+stabilization window. Treat 10,000 as a starting point, not a capacity claim:
+run the connection and event workload that matches your deployment, then set
+the target below the first observed latency, CPU, memory, file-descriptor, or
+drop limit.
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wss-mux
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wss-mux
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: wss_mux_connections_active
+        target:
+          type: AverageValue
+          averageValue: "10000"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+```
+
+The scale-up policy allows either a doubling or four new pods per minute,
+whichever is larger; change it if node provisioning or connection churn calls
+for a different ramp. During scale-down, the stabilization window makes the
+HPA choose the highest recommendation recorded in the preceding five minutes,
+which reduces flapping after a connection burst. It is not a five-minute
+cooldown: when there is no recent higher recommendation, the HPA can scale down
+immediately and disconnect that pod's clients.
+
+CPU utilization is a useful secondary guardrail, but not the primary target:
+WebSocket connection load can grow before CPU does. Add a throughput metric
+when the event rate, rather than the connection count, limits a deployment.
+For example, have the adapter expose a per-pod
+`wss_mux_events_dispatched_per_second` metric derived from
+`sum(rate(wss_mux_events_dispatched_total[2m])) by (namespace, pod)`, then add
+it as another `Pods` metric. HPA chooses the largest replica recommendation
+from its metrics, so this complements the connection target instead of
+replacing it. Set its target from a representative load test; event payload
+size, stream fanout, and subscriber mix make a universal events-per-second
+value misleading.
+
+An HPA creates a pod before it can receive client traffic, but peer discovery
+still has its own delay: after the pod becomes Ready, existing pods can take
+up to `WSS_MUX_PEER_DNS_REFRESH_SECS` (three seconds by default) to discover
+it. Size the scale-up policy and connection headroom for that interval; the
+new pod's clients can miss relayed events until discovery converges.
 
 > **If you rename the headless Service and set neither
 > `WSS_MUX_PEER_SERVICE` nor `WSS_MUX_PEER_DNS`, discovery resolves
