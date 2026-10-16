@@ -440,12 +440,16 @@ impl Config {
 
         let push_overload_rate_per_sec =
             parse_u32("WSS_MUX_PUSH_OVERLOAD_RATE", DEFAULT_PUSH_OVERLOAD_RATE)?;
-        let default_push_overload_burst = push_overload_rate_per_sec.saturating_mul(2);
-        let push_overload_burst =
-            parse_u32("WSS_MUX_PUSH_OVERLOAD_BURST", default_push_overload_burst)?;
-        if push_overload_rate_per_sec > 0 && push_overload_burst == 0 {
-            return Err(ConfigError::InvalidPushOverloadBurst);
-        }
+        let push_overload_burst = if push_overload_rate_per_sec == 0 {
+            0
+        } else {
+            let default = push_overload_rate_per_sec.saturating_mul(2);
+            let burst = parse_u32("WSS_MUX_PUSH_OVERLOAD_BURST", default)?;
+            if burst == 0 {
+                return Err(ConfigError::InvalidPushOverloadBurst);
+            }
+            burst
+        };
 
         let non_blank = |v: Option<String>| -> Option<String> {
             v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
