@@ -187,7 +187,7 @@ impl AppState {
     /// unlimited). Returns `Some(Ok(()))` when the request is admitted and
     /// `Some(Err(duration))` when the bucket is empty, where `duration` is
     /// the whole-second `Retry-After` value to include in the 503 response.
-    pub fn check_push_overload(&self) -> Option<Result<(), Duration>> {
+    fn check_push_overload(&self) -> Option<Result<(), Duration>> {
         let limiter = self.inner.push_overload_limiter.as_ref()?;
         Some(limiter.try_take(Instant::now()))
     }

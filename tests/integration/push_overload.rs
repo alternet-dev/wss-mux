@@ -27,7 +27,6 @@ fn event() -> serde_json::Value {
 #[tokio::test]
 async fn overload_signal_is_opt_in_and_leaves_default_pushes_unlimited() {
     let state = test_state_with_manifest();
-    assert!(state.check_push_overload().is_none());
     let addr = spawn_server(state).await;
     let http = reqwest::Client::new();
 
