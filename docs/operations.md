@@ -5,6 +5,10 @@ how cross-instance fanout works, how to deploy it with zero
 configuration on Kubernetes, and how to diagnose it when something
 looks wrong.
 
+For choosing between broadcast, concentrated, and keyed subscriber
+topologies before deploying a fleet, read
+[Deployment patterns](deployment-patterns.md).
+
 ## Single vs. multi-instance
 
 One instance is the simple case and the right default. Each instance
