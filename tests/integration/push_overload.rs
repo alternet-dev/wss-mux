@@ -44,6 +44,42 @@ async fn overload_signal_is_opt_in_and_leaves_default_pushes_unlimited() {
 }
 
 #[tokio::test]
+async fn overload_burst_defaults_to_twice_rate_when_not_set_programmatically() {
+    // A programmatic caller that sets only push_overload_rate_per_sec
+    // (leaving push_overload_burst at the zero default from Config::new)
+    // must get a working two-token burst, not a zero-capacity bucket that
+    // rejects every authenticated push with 503.
+    let mut cfg = test_config();
+    cfg.push_overload_rate_per_sec = 1;
+    // push_overload_burst is intentionally left at 0.
+    let state = AppState::new(cfg);
+    state.set_manifest(crate::common::sample_manifest());
+    let addr = spawn_server(state).await;
+    let http = reqwest::Client::new();
+
+    // The default burst is 2 * rate = 2, so two requests are admitted.
+    for _ in 0..2 {
+        let resp = http
+            .post(format!("http://{addr}/events"))
+            .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+            .json(&event())
+            .send()
+            .await
+            .expect("push");
+        assert_eq!(resp.status(), reqwest::StatusCode::NO_CONTENT);
+    }
+    // Third request exhausts the burst and is rejected.
+    let resp = http
+        .post(format!("http://{addr}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&event())
+        .send()
+        .await
+        .expect("push");
+    assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
 async fn exhausted_push_returns_retryable_overload_without_dispatching() {
     let state = overloaded_state();
     let addr = spawn_server(state.clone()).await;
@@ -80,8 +116,11 @@ async fn exhausted_push_returns_retryable_overload_without_dispatching() {
         .await
         .expect("accepted push");
     assert_eq!(accepted.status(), reqwest::StatusCode::NO_CONTENT);
-    let _ = recv_event(&mut ws).await;
 
+    // Check rejection before awaiting the WebSocket event: the bucket
+    // refills after one second, so any unbounded async wait between
+    // consuming the token and asserting rejection can make this
+    // nondeterministic.
     let rejected = http
         .post(format!("http://{addr}/events"))
         .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
@@ -102,6 +141,10 @@ async fn exhausted_push_returns_retryable_overload_without_dispatching() {
         "close"
     );
     assert_eq!(state.metrics().push_overload_rejected.get(), 1);
+
+    // Drain the event dispatched by the accepted push before checking
+    // that the rejected push left nothing behind.
+    let _ = recv_event(&mut ws).await;
 
     assert!(
         tokio::time::timeout(Duration::from_millis(200), ws.next())

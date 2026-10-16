@@ -123,10 +123,16 @@ impl AppState {
             ))
         });
         let push_overload_limiter = (config.push_overload_rate_per_sec > 0).then(|| {
-            Arc::new(PushOverloadLimiter::new(
-                config.push_overload_burst,
-                config.push_overload_rate_per_sec,
-            ))
+            // `push_overload_burst == 0` means the caller did not set it.
+            // Apply the same "twice the rate" default that env parsing uses so
+            // that programmatic callers get a working bucket, not a
+            // zero-capacity one that rejects every request.
+            let burst = if config.push_overload_burst == 0 {
+                config.push_overload_rate_per_sec.saturating_mul(2)
+            } else {
+                config.push_overload_burst
+            };
+            Arc::new(PushOverloadLimiter::new(burst, config.push_overload_rate_per_sec))
         });
         Ok(Self {
             inner: Arc::new(Inner {
