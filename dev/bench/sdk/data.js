@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790100955926,
+  "lastUpdate": 1792171479763,
   "repoUrl": "https://github.com/alternet-dev/wss-mux",
   "entries": {
     "wss-mux-client SDK benchmarks": [
@@ -671,6 +671,54 @@ window.BENCHMARK_DATA = {
             "name": "subscribe_one",
             "value": 42821,
             "range": "± 1960",
+            "unit": "ns/iter"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "315291739+holy-metatron[bot]@users.noreply.github.com",
+            "name": "holy-metatron[bot]",
+            "username": "holy-metatron[bot]"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2895d79c8db7551c8a7d67aa4df6356352666e6e",
+          "message": "docs(protocol): define OIDC JWKS rotation contract (#58) (#116)\n\nCo-authored-by: holy-metatron[bot] <315291739+holy-metatron[bot]@users.noreply.github.com>",
+          "timestamp": "2026-10-16T17:22:31Z",
+          "tree_id": "c134f6890a0c4bc241aedd3a45d51bd4b1df7541",
+          "url": "https://github.com/alternet-dev/wss-mux/commit/2895d79c8db7551c8a7d67aa4df6356352666e6e"
+        },
+        "date": 1792171478893,
+        "tool": "cargo",
+        "benches": [
+          {
+            "name": "publish_self_roundtrip",
+            "value": 1094739,
+            "range": "± 46784",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/10",
+            "value": 11129828,
+            "range": "± 334414",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "publish_throughput/100",
+            "value": 110425368,
+            "range": "± 2631116",
+            "unit": "ns/iter"
+          },
+          {
+            "name": "subscribe_one",
+            "value": 43294,
+            "range": "± 1580",
             "unit": "ns/iter"
           }
         ]
