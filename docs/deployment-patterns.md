@@ -16,17 +16,17 @@ peer-discovery setup, TLS, and failure runbook, see
 ```text
 One instance is enough?
   yes -> Run one instance. No peer topology is needed.
-  no  -> Are most events for an unkeyed audience spread across the fleet?
-           yes -> Broadcast
-           no  -> Are subscribers unintentionally clustered on one instance?
-                    yes -> Concentrated
-                    no  -> Keyed
+  no  -> Do most events address one of many small audiences by key?
+           yes -> Keyed
+           no  -> Is the unkeyed audience broadly spread across the fleet?
+                    yes -> Broadcast
+                    no  -> Concentrated
 ```
 
 | Pattern | Subscriber placement | First choice | What to watch |
 |---|---|---|---|
 | [Broadcast](#broadcast) | A broad, unkeyed audience is balanced among instances. | Regular `ClusterIP` Service; default kube-proxy iptables round-robin is sufficient. | Normal peer count and relay health. Selective relay has little to save. |
-| [Concentrated](#concentrated) | One unkeyed audience is mostly on one instance. | Keep the regular `ClusterIP` Service, then fix the client-connection imbalance. | High `wss_mux_relay_events_unwanted_total` relative to relayed events. |
+| [Concentrated](#concentrated) | One unkeyed audience is mostly on one instance. | Keep the regular `ClusterIP` Service; confirm that the placement is deliberate or fix the client-connection imbalance. | High `wss_mux_relay_events_unwanted_total` relative to relayed events. |
 | [Keyed](#keyed) | Many small keyed audiences are scattered among instances. | Keep the regular `ClusterIP` Service; evaluate key-aware placement only when its complexity is justified. | Relay waste that grows with fleet size. |
 
 The built-in load harness uses these same names. Measure a representative
@@ -80,17 +80,19 @@ connection counts and `wss_mux_peers_known` after rollouts and scale events.
 ## Concentrated
 
 This pattern means an unkeyed audience has accumulated on one instance while
-the fleet has other instances. It is usually an anti-pattern: an event
-accepted elsewhere still relays to every peer, but most peers have no local
-subscriber and the concentrated instance bears the client work.
+the fleet has other instances. The placement, not whether it was intentional,
+defines the pattern. It is usually an anti-pattern: an event accepted elsewhere
+still relays to every peer, but most peers have no local subscriber and the
+concentrated instance bears the client work.
 
-Start with the regular `ClusterIP` Service and find the source of the
-clustering, such as client affinity, a misconfigured external balancer, or a
-small audience that has not had a chance to spread. If the cluster runs
-kube-proxy in IPVS mode, consider its `lc` (least-connection) scheduler for
-new client connections. It can improve placement for this pattern, but it
-does not move established WebSockets and it is not a substitute for correcting
-explicit stickiness.
+Start with the regular `ClusterIP` Service. If the concentration is deliberate,
+confirm that the hot instance has enough headroom and measure relay waste before
+adding routing complexity. Otherwise, find the source of the clustering, such
+as client affinity, a misconfigured external balancer, or a small audience that
+has not had a chance to spread. If the cluster runs kube-proxy in IPVS mode,
+consider its `lc` (least-connection) scheduler for new client connections. It
+can improve placement for this pattern, but it does not move established
+WebSockets and it is not a substitute for correcting explicit stickiness.
 
 Interest-based selective relay is likely valuable when this pattern is common,
 because the waste grows with fleet size. It is designed but not implemented;
