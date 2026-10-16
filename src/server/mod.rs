@@ -132,7 +132,10 @@ impl AppState {
             } else {
                 config.push_overload_burst
             };
-            Arc::new(PushOverloadLimiter::new(burst, config.push_overload_rate_per_sec))
+            Arc::new(PushOverloadLimiter::new(
+                burst,
+                config.push_overload_rate_per_sec,
+            ))
         });
         Ok(Self {
             inner: Arc::new(Inner {
