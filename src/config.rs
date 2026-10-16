@@ -670,6 +670,16 @@ mod tests {
     }
 
     #[test]
+    fn push_overload_explicit_burst_overrides_rate_default() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "10"));
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_BURST", "3"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_overload_rate_per_sec, 10);
+        assert_eq!(cfg.push_overload_burst, 3);
+    }
+
+    #[test]
     fn ws_publish_burst_defaults_to_2x_rate_when_unset() {
         let mut pairs = minimal();
         pairs.push(("WSS_MUX_WS_PUBLISH_RATE", "10"));
