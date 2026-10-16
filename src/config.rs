@@ -440,18 +440,9 @@ impl Config {
 
         let push_overload_rate_per_sec =
             parse_u32("WSS_MUX_PUSH_OVERLOAD_RATE", DEFAULT_PUSH_OVERLOAD_RATE)?;
-        let push_overload_burst = match (
-            get("WSS_MUX_PUSH_OVERLOAD_BURST"),
-            push_overload_rate_per_sec,
-        ) {
-            (Some(v), _) => v.parse().map_err(|source| ConfigError::InvalidUnsigned {
-                var: "WSS_MUX_PUSH_OVERLOAD_BURST",
-                value: v.clone(),
-                source,
-            })?,
-            (None, 0) => 0,
-            (None, rate) => rate.saturating_mul(2),
-        };
+        let default_push_overload_burst = push_overload_rate_per_sec.saturating_mul(2);
+        let push_overload_burst =
+            parse_u32("WSS_MUX_PUSH_OVERLOAD_BURST", default_push_overload_burst)?;
         if push_overload_rate_per_sec > 0 && push_overload_burst == 0 {
             return Err(ConfigError::InvalidPushOverloadBurst);
         }
