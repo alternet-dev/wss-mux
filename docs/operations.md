@@ -182,10 +182,10 @@ the Prometheus scrape target's `namespace` and `pod` labels so Kubernetes can
 associate each sample with its pod.
 
 This recipe starts at 10,000 connections per pod, keeps three replicas for
-availability, permits a fleet of up to 20, and waits five minutes before
-scaling down. Treat 10,000 as a starting point, not a capacity claim: run the
-connection and event workload that matches your deployment, then set the
-target below the first observed latency, CPU, memory, file-descriptor, or
+availability, permits a fleet of up to 20, and uses a five-minute scale-down
+stabilization window. Treat 10,000 as a starting point, not a capacity claim:
+run the connection and event workload that matches your deployment, then set
+the target below the first observed latency, CPU, memory, file-descriptor, or
 drop limit.
 
 ```yaml
@@ -229,9 +229,11 @@ spec:
 
 The scale-up policy allows either a doubling or four new pods per minute,
 whichever is larger; change it if node provisioning or connection churn calls
-for a different ramp. The scale-down stabilization window avoids terminating
-pods immediately after a transient connection burst, which would disconnect
-their clients.
+for a different ramp. During scale-down, the stabilization window makes the
+HPA choose the highest recommendation recorded in the preceding five minutes,
+which reduces flapping after a connection burst. It is not a five-minute
+cooldown: when there is no recent higher recommendation, the HPA can scale down
+immediately and disconnect that pod's clients.
 
 CPU utilization is a useful secondary guardrail, but not the primary target:
 WebSocket connection load can grow before CPU does. Add a throughput metric
