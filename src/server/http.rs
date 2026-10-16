@@ -175,8 +175,7 @@ fn rejection((status, message): (StatusCode, &'static str)) -> Response {
 /// Relay receipts deliberately do not call this: peer delivery is an internal
 /// best-effort path, not producer ingress.
 fn overload_response(state: &AppState) -> Option<Response> {
-    let limiter = state.push_overload_limiter()?;
-    let retry_after = limiter.try_take(std::time::Instant::now()).err()?;
+    let retry_after = state.check_push_overload()?.err()?;
     state.metrics().push_overload_rejected.inc();
     Some(
         (

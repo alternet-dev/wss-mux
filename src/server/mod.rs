@@ -8,6 +8,7 @@ use self::metrics::Metrics;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -181,11 +182,14 @@ impl AppState {
         self.inner.ws_publish_limiter.as_ref()
     }
 
-    /// Process-wide HTTP producer overload limiter. `None` means the
-    /// operator has not opted in, so producer pushes retain their original
-    /// non-blocking response behavior.
-    pub fn push_overload_limiter(&self) -> Option<&Arc<PushOverloadLimiter>> {
-        self.inner.push_overload_limiter.as_ref()
+    /// Consume one token from the process-wide HTTP producer overload bucket.
+    /// Returns `None` when the operator has not opted in (pushes are
+    /// unlimited). Returns `Some(Ok(()))` when the request is admitted and
+    /// `Some(Err(duration))` when the bucket is empty, where `duration` is
+    /// the whole-second `Retry-After` value to include in the 503 response.
+    pub fn check_push_overload(&self) -> Option<Result<(), Duration>> {
+        let limiter = self.inner.push_overload_limiter.as_ref()?;
+        Some(limiter.try_take(Instant::now()))
     }
 
     /// Current manifest snapshot. The returned `Arc` is independent of any
