@@ -661,6 +661,16 @@ mod tests {
     }
 
     #[test]
+    fn disabled_push_overload_ignores_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "0"));
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_BURST", "not-a-number"));
+        let cfg = Config::from_getter(env(&pairs)).expect("disabled overload config");
+        assert_eq!(cfg.push_overload_rate_per_sec, 0);
+        assert_eq!(cfg.push_overload_burst, 0);
+    }
+
+    #[test]
     fn push_overload_explicit_burst_overrides_rate_default() {
         let mut pairs = minimal();
         pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "10"));
