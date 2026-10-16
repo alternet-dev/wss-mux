@@ -1,59 +1,6 @@
 use crate::connection::Outbound;
 use crate::envelope::ServerFrame;
 
-/// The closed v1 set of machine-readable error codes.
-///
-/// Keep this in lockstep with the Error codes table in `docs/protocol.md`.
-/// Message text is intentionally not represented here because it is
-/// diagnostic, not a stable wire value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ErrorCode {
-    UnknownFrameType,
-    BadFrame,
-    Unauthenticated,
-    ExpiredToken,
-    UnknownStream,
-    UnauthorizedSubscribe,
-    UnauthorizedPublish,
-    DuplicateSubscriptionId,
-    PublishPayloadTooLarge,
-    RateLimited,
-    Overflow,
-}
-
-impl ErrorCode {
-    #[cfg(test)]
-    const ALL: [Self; 11] = [
-        Self::UnknownFrameType,
-        Self::BadFrame,
-        Self::Unauthenticated,
-        Self::ExpiredToken,
-        Self::UnknownStream,
-        Self::UnauthorizedSubscribe,
-        Self::UnauthorizedPublish,
-        Self::DuplicateSubscriptionId,
-        Self::PublishPayloadTooLarge,
-        Self::RateLimited,
-        Self::Overflow,
-    ];
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::UnknownFrameType => "unknown_frame_type",
-            Self::BadFrame => "bad_frame",
-            Self::Unauthenticated => "unauthenticated",
-            Self::ExpiredToken => "expired_token",
-            Self::UnknownStream => "unknown_stream",
-            Self::UnauthorizedSubscribe => "unauthorized_subscribe",
-            Self::UnauthorizedPublish => "unauthorized_publish",
-            Self::DuplicateSubscriptionId => "duplicate_subscription_id",
-            Self::PublishPayloadTooLarge => "publish_payload_too_large",
-            Self::RateLimited => "rate_limited",
-            Self::Overflow => "overflow",
-        }
-    }
-}
-
 /// One variant per row of the error code table in `docs/protocol.md`.
 ///
 /// `Overflow` is keep-open and per-subscription (v0.4): the offending
@@ -76,22 +23,18 @@ pub enum ProtocolError {
 
 impl ProtocolError {
     pub fn code(&self) -> &'static str {
-        self.error_code().as_str()
-    }
-
-    fn error_code(&self) -> ErrorCode {
         match self {
-            Self::UnknownFrameType => ErrorCode::UnknownFrameType,
-            Self::BadFrame => ErrorCode::BadFrame,
-            Self::Unauthenticated { .. } => ErrorCode::Unauthenticated,
-            Self::ExpiredToken => ErrorCode::ExpiredToken,
-            Self::UnknownStream { .. } => ErrorCode::UnknownStream,
-            Self::UnauthorizedSubscribe { .. } => ErrorCode::UnauthorizedSubscribe,
-            Self::UnauthorizedPublish { .. } => ErrorCode::UnauthorizedPublish,
-            Self::DuplicateSubscriptionId { .. } => ErrorCode::DuplicateSubscriptionId,
-            Self::PublishPayloadTooLarge { .. } => ErrorCode::PublishPayloadTooLarge,
-            Self::RateLimited { .. } => ErrorCode::RateLimited,
-            Self::Overflow { .. } => ErrorCode::Overflow,
+            Self::UnknownFrameType => "unknown_frame_type",
+            Self::BadFrame => "bad_frame",
+            Self::Unauthenticated { .. } => "unauthenticated",
+            Self::ExpiredToken => "expired_token",
+            Self::UnknownStream { .. } => "unknown_stream",
+            Self::UnauthorizedSubscribe { .. } => "unauthorized_subscribe",
+            Self::UnauthorizedPublish { .. } => "unauthorized_publish",
+            Self::DuplicateSubscriptionId { .. } => "duplicate_subscription_id",
+            Self::PublishPayloadTooLarge { .. } => "publish_payload_too_large",
+            Self::RateLimited { .. } => "rate_limited",
+            Self::Overflow { .. } => "overflow",
         }
     }
 
@@ -177,22 +120,41 @@ mod tests {
 
     #[test]
     fn v1_wire_error_codes_are_frozen() {
-        assert_eq!(
-            ErrorCode::ALL.map(ErrorCode::as_str),
-            [
-                "unknown_frame_type",
-                "bad_frame",
+        let cases = [
+            (ProtocolError::UnknownFrameType, "unknown_frame_type"),
+            (ProtocolError::BadFrame, "bad_frame"),
+            (
+                ProtocolError::Unauthenticated { id: None },
                 "unauthenticated",
-                "expired_token",
+            ),
+            (ProtocolError::ExpiredToken, "expired_token"),
+            (
+                ProtocolError::UnknownStream { id: "x".into() },
                 "unknown_stream",
+            ),
+            (
+                ProtocolError::UnauthorizedSubscribe { id: "x".into() },
                 "unauthorized_subscribe",
+            ),
+            (
+                ProtocolError::UnauthorizedPublish { id: "x".into() },
                 "unauthorized_publish",
+            ),
+            (
+                ProtocolError::DuplicateSubscriptionId { id: "x".into() },
                 "duplicate_subscription_id",
+            ),
+            (
+                ProtocolError::PublishPayloadTooLarge { id: "x".into() },
                 "publish_payload_too_large",
-                "rate_limited",
-                "overflow",
-            ]
-        );
+            ),
+            (ProtocolError::RateLimited { id: None }, "rate_limited"),
+            (ProtocolError::Overflow { id: "x".into() }, "overflow"),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.code(), expected);
+        }
     }
 
     #[test]
