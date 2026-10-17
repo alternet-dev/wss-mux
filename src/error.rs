@@ -115,6 +115,9 @@ impl ProtocolError {
 }
 
 #[cfg(test)]
+// Characterization tests: all tests below verify pre-existing wire behavior
+// of ProtocolError. This module carries no new production code in this PR;
+// see the "Test development record" in the pull request description.
 mod tests {
     use super::*;
 
