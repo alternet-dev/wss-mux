@@ -103,6 +103,11 @@ curl -X POST http://localhost:8080/events \
   -d '{"stream":"chat_messages","key":"room-42","payload":{"text":"hi"}}'
 ```
 
+Producers in an operator-controlled fleet may add `X-Producer-Id` as an
+opaque fairness key; producers that omit it share the default identity. See
+[embedding](docs/embedding.md#producer-identity) for its trust boundary and
+validation rules.
+
 Subscribe (client) — using the TypeScript SDK
 ([`@alternet/wss-mux-client`](clients/typescript/)):
 

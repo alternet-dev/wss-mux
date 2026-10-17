@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use axum::body::Bytes;
@@ -20,6 +21,65 @@ use crate::envelope::{EnvelopePaths, EventEnvelope, ServerFrame};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
 use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
+
+const PRODUCER_ID_HEADER: &str = "x-producer-id";
+const DEFAULT_PRODUCER_ID: &str = "shared";
+
+/// Opaque fairness identity supplied by an authenticated HTTP producer.
+///
+/// This ingress metadata is intentionally not an authentication principal:
+/// the shared push bearer remains the authorization boundary. It gives future
+/// fairness controls a stable key without coupling the binary to a particular
+/// token issuer or network topology.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProducerIdentity(Arc<str>);
+
+impl ProducerIdentity {
+    /// Identity used for existing producers that do not send the header.
+    fn shared() -> Self {
+        Self(Arc::from(DEFAULT_PRODUCER_ID))
+    }
+
+    /// Parse a declared producer identity. The wire contract accepts a
+    /// bounded, printable ASCII token so it is safe to retain as a future
+    /// in-memory fairness key.
+    fn declared(value: &str) -> Option<Self> {
+        const MAX_LEN: usize = 128;
+        (!value.is_empty()
+            && value.len() <= MAX_LEN
+            && value.bytes().all(|byte| byte.is_ascii_graphic()))
+        .then(|| Self(Arc::from(value)))
+    }
+
+    /// The stable value used to key producer-scoped controls.
+    #[cfg(test)]
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// HTTP event ingress metadata. Producer identity stays separate from
+/// `EventOrigin`, whose public unit variants predate this wire addition.
+enum HttpEventSource {
+    Producer(ProducerIdentity),
+    Peer,
+}
+
+impl HttpEventSource {
+    fn producer_identity(&self) -> Option<&ProducerIdentity> {
+        match self {
+            Self::Producer(identity) => Some(identity),
+            Self::Peer => None,
+        }
+    }
+
+    fn event_origin(&self) -> EventOrigin {
+        match self {
+            Self::Producer(_) => EventOrigin::Producer,
+            Self::Peer => EventOrigin::Peer,
+        }
+    }
+}
 
 pub async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     let body = state.metrics().encode();
@@ -49,7 +109,7 @@ fn envelope_paths(config: &Config) -> EnvelopePaths<'_> {
 fn accept_events(
     state: &AppState,
     events: Vec<EventEnvelope>,
-    origin: EventOrigin,
+    source: HttpEventSource,
 ) -> Result<(), (StatusCode, &'static str)> {
     let manifest = state
         .manifest()
@@ -83,9 +143,10 @@ fn accept_events(
 
     // Capture the canonical batch for relay before the dispatch loop
     // consumes it (only when this is a producer push).
-    let relay_batch = (origin == EventOrigin::Producer).then(|| RelayBatch {
+    let relay_batch = source.producer_identity().map(|_| RelayBatch {
         events: events.clone(),
     });
+    let origin = source.event_origin();
 
     for envelope in events {
         dispatch(state, envelope, origin);
@@ -108,6 +169,10 @@ pub async fn push_event(
     if let Some(response) = overload_response(&state) {
         return response;
     }
+    let producer = match producer_identity(&headers) {
+        Ok(producer) => producer,
+        Err(error) => return rejection(error),
+    };
 
     let Json(body) = match body {
         Ok(body) => body,
@@ -118,7 +183,7 @@ pub async fn push_event(
         Err(_) => return rejection((StatusCode::BAD_REQUEST, "invalid envelope")),
     };
 
-    match accept_events(&state, vec![envelope], EventOrigin::Producer) {
+    match accept_events(&state, vec![envelope], HttpEventSource::Producer(producer)) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => rejection(error),
     }
@@ -141,6 +206,10 @@ pub async fn push_batch(
     if let Some(response) = overload_response(&state) {
         return response;
     }
+    let producer = match producer_identity(&headers) {
+        Ok(producer) => producer,
+        Err(error) => return rejection(error),
+    };
 
     let Json(body) = match body {
         Ok(body) => body,
@@ -160,7 +229,7 @@ pub async fn push_batch(
         parsed.push(envelope);
     }
 
-    match accept_events(&state, parsed, EventOrigin::Producer) {
+    match accept_events(&state, parsed, HttpEventSource::Producer(producer)) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => rejection(error),
     }
@@ -206,7 +275,7 @@ pub async fn relay_receive(
     let batch: RelayBatch = ciborium::from_reader(body.as_ref())
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR relay body"))?;
 
-    accept_events(&state, batch.events, EventOrigin::Peer)?;
+    accept_events(&state, batch.events, HttpEventSource::Peer)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -434,6 +503,21 @@ fn authenticate(headers: &HeaderMap, expected: &str) -> Result<(), (StatusCode, 
     }
 }
 
+/// Resolve the authenticated producer's opaque fairness key. The header is
+/// optional for compatibility: existing producers share the default key.
+/// Authentication deliberately happens before this parse, so the header
+/// cannot turn an unauthenticated request into a distinguishable oracle.
+fn producer_identity(headers: &HeaderMap) -> Result<ProducerIdentity, (StatusCode, &'static str)> {
+    match headers.get(PRODUCER_ID_HEADER) {
+        None => Ok(ProducerIdentity::shared()),
+        Some(value) => value
+            .to_str()
+            .ok()
+            .and_then(ProducerIdentity::declared)
+            .ok_or((StatusCode::BAD_REQUEST, "invalid producer identity")),
+    }
+}
+
 /// Constant-time byte slice comparison to avoid timing leaks on the push token.
 fn subtle_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -463,5 +547,37 @@ mod tests {
     #[test]
     fn subtle_eq_rejects_different_length() {
         assert!(!subtle_eq(b"abc", b"abcd"));
+    }
+
+    #[test]
+    fn producer_identity_defaults_to_shared() {
+        let identity = producer_identity(&HeaderMap::new()).expect("default identity");
+        assert_eq!(identity.as_str(), "shared");
+    }
+
+    #[test]
+    fn producer_identity_accepts_printable_ascii() {
+        let mut headers = HeaderMap::new();
+        headers.insert(PRODUCER_ID_HEADER, "billing-api:primary".parse().unwrap());
+
+        let identity = producer_identity(&headers).expect("declared identity");
+        assert_eq!(identity.as_str(), "billing-api:primary");
+    }
+
+    #[test]
+    fn producer_identity_rejects_whitespace_and_oversized_values() {
+        let mut whitespace = HeaderMap::new();
+        whitespace.insert(PRODUCER_ID_HEADER, "billing api".parse().unwrap());
+        assert_eq!(
+            producer_identity(&whitespace),
+            Err((StatusCode::BAD_REQUEST, "invalid producer identity"))
+        );
+
+        let mut oversized = HeaderMap::new();
+        oversized.insert(PRODUCER_ID_HEADER, "a".repeat(129).parse().unwrap());
+        assert_eq!(
+            producer_identity(&oversized),
+            Err((StatusCode::BAD_REQUEST, "invalid producer identity"))
+        );
     }
 }
