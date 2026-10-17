@@ -122,6 +122,7 @@ async fn push_with_wrong_bearer_token_is_401() {
     let resp = http
         .post(format!("http://{addr}/events"))
         .header("Authorization", "Bearer wrong-token")
+        .header("X-Producer-Id", "invalid producer")
         .json(&serde_json::json!({
             "stream": "chat_messages",
             "payload": {}
@@ -129,6 +130,24 @@ async fn push_with_wrong_bearer_token_is_401() {
         .send()
         .await
         .expect("push");
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn batch_push_without_bearer_token_is_401_before_producer_identity_validation() {
+    let state = test_state_with_manifest();
+    let addr = spawn_server(state).await;
+
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("http://{addr}/events/batch"))
+        .header("X-Producer-Id", "invalid producer")
+        .json(&serde_json::json!({
+            "events": [{"stream": "chat_messages", "payload": {}}]
+        }))
+        .send()
+        .await
+        .expect("batch push");
     assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
 }
 
