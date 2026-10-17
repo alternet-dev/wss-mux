@@ -123,6 +123,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v1_error_code_taxonomy_is_closed() {
+        assert_eq!(
+            ErrorCode::ALL.map(ErrorCode::as_str),
+            [
+                "unknown_frame_type",
+                "bad_frame",
+                "unauthenticated",
+                "expired_token",
+                "unknown_stream",
+                "unauthorized_subscribe",
+                "unauthorized_publish",
+                "duplicate_subscription_id",
+                "publish_payload_too_large",
+                "rate_limited",
+                "overflow",
+            ]
+        );
+    }
+
+    #[test]
     fn v1_wire_error_codes_are_frozen() {
         let cases = [
             (ProtocolError::UnknownFrameType, "unknown_frame_type"),
