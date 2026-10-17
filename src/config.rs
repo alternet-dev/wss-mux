@@ -29,6 +29,9 @@ pub const DEFAULT_WS_PUBLISH_IDLE_TTL_SECS: u64 = 300;
 /// `conn:<id>` source key (per-connection limit instead of per-user).
 /// When `true`, such a token is refused with `unauthorized_publish`.
 pub const DEFAULT_WS_PUBLISH_REQUIRE_SUB: bool = false;
+/// HTTP producer overload signaling is disabled by default. When set above
+/// zero, each process creates one shared token bucket for `/events` pushes.
+pub const DEFAULT_PUSH_OVERLOAD_RATE: u32 = 0;
 pub const DEFAULT_RELAY_COALESCE_MS: u64 = 0;
 pub const DEFAULT_RELAY_COALESCE_MAX_EVENTS: usize = 1024;
 pub const DEFAULT_RELAY_QUEUE_DEPTH: usize = 1024;
@@ -136,6 +139,12 @@ pub struct Config {
     /// A bucket whose `last_seen` is older than this is dropped; the
     /// sweep runs at one-tenth this cadence on a tokio interval task.
     pub ws_publish_idle_ttl: Duration,
+    /// HTTP producer request rate at which this process starts returning an
+    /// explicit overload response. `0` disables the feature entirely.
+    pub push_overload_rate_per_sec: u32,
+    /// Token-bucket capacity for the HTTP producer overload limiter.
+    /// `0` defaults to `2 * push_overload_rate_per_sec` when the rate is set.
+    pub push_overload_burst: u32,
     /// Relay coalescing flush window (ms). `0` (default) disables
     /// coalescing entirely → relay is spawned per producer push,
     /// byte-identical to pre-v0.5. `>0` batches relayed events.
@@ -244,6 +253,11 @@ pub enum ConfigError {
         #[source]
         source: ParseIntError,
     },
+    #[error(
+        "WSS_MUX_PUSH_OVERLOAD_BURST must be greater than zero when \
+         WSS_MUX_PUSH_OVERLOAD_RATE is enabled"
+    )]
+    InvalidPushOverloadBurst,
     #[error("invalid WSS_MUX_PEERS: {0}")]
     InvalidPeers(#[source] peers::PeerUrlError),
     #[error(
@@ -285,6 +299,8 @@ impl Config {
             ws_publish_burst: 0,
             ws_publish_require_sub: DEFAULT_WS_PUBLISH_REQUIRE_SUB,
             ws_publish_idle_ttl: Duration::from_secs(DEFAULT_WS_PUBLISH_IDLE_TTL_SECS),
+            push_overload_rate_per_sec: DEFAULT_PUSH_OVERLOAD_RATE,
+            push_overload_burst: 0,
             relay_coalesce_ms: DEFAULT_RELAY_COALESCE_MS,
             relay_coalesce_max_events: DEFAULT_RELAY_COALESCE_MAX_EVENTS,
             relay_queue_depth: DEFAULT_RELAY_QUEUE_DEPTH,
@@ -422,6 +438,19 @@ impl Config {
             DEFAULT_WS_PUBLISH_IDLE_TTL_SECS,
         )?);
 
+        let push_overload_rate_per_sec =
+            parse_u32("WSS_MUX_PUSH_OVERLOAD_RATE", DEFAULT_PUSH_OVERLOAD_RATE)?;
+        let push_overload_burst = if push_overload_rate_per_sec == 0 {
+            0
+        } else {
+            let default = push_overload_rate_per_sec.saturating_mul(2);
+            let burst = parse_u32("WSS_MUX_PUSH_OVERLOAD_BURST", default)?;
+            if burst == 0 {
+                return Err(ConfigError::InvalidPushOverloadBurst);
+            }
+            burst
+        };
+
         let non_blank = |v: Option<String>| -> Option<String> {
             v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
         };
@@ -521,6 +550,8 @@ impl Config {
             ws_publish_burst,
             ws_publish_require_sub,
             ws_publish_idle_ttl,
+            push_overload_rate_per_sec,
+            push_overload_burst,
             relay_coalesce_ms,
             relay_coalesce_max_events,
             relay_queue_depth,
@@ -607,6 +638,53 @@ mod tests {
             cfg.ws_publish_idle_ttl,
             Duration::from_secs(DEFAULT_WS_PUBLISH_IDLE_TTL_SECS)
         );
+    }
+
+    #[test]
+    fn push_overload_defaults_to_disabled() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert_eq!(cfg.push_overload_rate_per_sec, DEFAULT_PUSH_OVERLOAD_RATE);
+        assert_eq!(cfg.push_overload_burst, 0);
+    }
+
+    #[test]
+    fn enabled_push_overload_defaults_burst_to_twice_rate() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "10"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_overload_rate_per_sec, 10);
+        assert_eq!(cfg.push_overload_burst, 20);
+    }
+
+    #[test]
+    fn enabled_push_overload_rejects_zero_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "1"));
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_BURST", "0"));
+        assert!(matches!(
+            Config::from_getter(env(&pairs)),
+            Err(ConfigError::InvalidPushOverloadBurst)
+        ));
+    }
+
+    #[test]
+    fn disabled_push_overload_ignores_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "0"));
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_BURST", "not-a-number"));
+        let cfg = Config::from_getter(env(&pairs)).expect("disabled overload config");
+        assert_eq!(cfg.push_overload_rate_per_sec, 0);
+        assert_eq!(cfg.push_overload_burst, 0);
+    }
+
+    #[test]
+    fn push_overload_explicit_burst_overrides_rate_default() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_RATE", "10"));
+        pairs.push(("WSS_MUX_PUSH_OVERLOAD_BURST", "3"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_overload_rate_per_sec, 10);
+        assert_eq!(cfg.push_overload_burst, 3);
     }
 
     #[test]

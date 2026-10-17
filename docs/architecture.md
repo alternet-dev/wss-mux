@@ -48,6 +48,12 @@ authenticate a request and is not forwarded over peer relay. Validates the
 event envelope, forwards to the dispatcher.
 Stateless.
 
+An optional process-wide token bucket can reject authenticated producer
+requests before validation with `503`, a whole-second `Retry-After`,
+and `Connection: close`. It is disabled by default and does not gate
+internal peer relay receipts, so it adds no producer backpressure until
+an operator explicitly configures it.
+
 `GET /events/:stream` exposes the same event stream as a
 Server-Sent Events response — the consumer story for backends that
 don't want a long-lived WebSocket (a separate `presence_svc`, an
