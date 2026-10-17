@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use axum::body::Bytes;
@@ -15,13 +16,47 @@ use serde_json::Value;
 use crate::auth::{audience_admits, AuthError};
 use crate::config::Config;
 use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx};
-use crate::dispatcher::{dispatch, EventOrigin, ProducerIdentity};
+use crate::dispatcher::{dispatch, EventOrigin};
 use crate::envelope::{EnvelopePaths, EventEnvelope, ServerFrame};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
 use crate::server::relay::{spawn_relay, RelayBatch};
 use crate::server::AppState;
 
 const PRODUCER_ID_HEADER: &str = "x-producer-id";
+const DEFAULT_PRODUCER_ID: &str = "shared";
+
+/// Opaque fairness identity supplied by an authenticated HTTP producer.
+///
+/// This ingress metadata is intentionally not an authentication principal:
+/// the shared push bearer remains the authorization boundary. It gives future
+/// fairness controls a stable key without coupling the binary to a particular
+/// token issuer or network topology.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProducerIdentity(Arc<str>);
+
+impl ProducerIdentity {
+    /// Identity used for existing producers that do not send the header.
+    fn shared() -> Self {
+        Self(Arc::from(DEFAULT_PRODUCER_ID))
+    }
+
+    /// Parse a declared producer identity. The wire contract accepts a
+    /// bounded, printable ASCII token so it is safe to retain as a future
+    /// in-memory fairness key.
+    fn declared(value: &str) -> Option<Self> {
+        const MAX_LEN: usize = 128;
+        (!value.is_empty()
+            && value.len() <= MAX_LEN
+            && value.bytes().all(|byte| byte.is_ascii_graphic()))
+        .then(|| Self(Arc::from(value)))
+    }
+
+    /// The stable value used to key producer-scoped controls.
+    #[cfg(test)]
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// HTTP event ingress metadata. Producer identity stays separate from
 /// `EventOrigin`, whose public unit variants predate this wire addition.

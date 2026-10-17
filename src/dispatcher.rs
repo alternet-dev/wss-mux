@@ -1,45 +1,8 @@
-use std::sync::Arc;
-
 use crate::connection::{Outbound, SendError};
 use crate::envelope::{EventEnvelope, ServerFrame};
 use crate::error::ProtocolError;
 use crate::server::metrics::{DropReason, DropReasonLabel, StreamLabel};
 use crate::server::AppState;
-
-/// Default identity for an HTTP producer that omits `X-Producer-Id`.
-pub const DEFAULT_PRODUCER_ID: &str = "shared";
-
-/// Opaque fairness identity supplied by an authenticated HTTP producer.
-///
-/// This is intentionally not an authentication principal: the shared push
-/// bearer remains the authorization boundary. It gives future fairness
-/// controls a stable key without coupling the binary to a particular token
-/// issuer or network topology.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProducerIdentity(Arc<str>);
-
-impl ProducerIdentity {
-    /// Identity used for existing producers that do not send the header.
-    pub fn shared() -> Self {
-        Self(Arc::from(DEFAULT_PRODUCER_ID))
-    }
-
-    /// Parse a declared producer identity. The wire contract accepts a
-    /// bounded, printable ASCII token so it is safe to retain as a future
-    /// in-memory fairness key.
-    pub fn declared(value: &str) -> Option<Self> {
-        const MAX_LEN: usize = 128;
-        (!value.is_empty()
-            && value.len() <= MAX_LEN
-            && value.bytes().all(|byte| byte.is_ascii_graphic()))
-        .then(|| Self(Arc::from(value)))
-    }
-
-    /// The stable value used to key producer-scoped controls.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
 
 /// Where an event entered the process. Producer pushes are relayed to
 /// peers; peer relay receipts are not (the one-hop guard). Used so a
