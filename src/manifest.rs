@@ -5,12 +5,14 @@ use serde::Deserialize;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub version: u32,
     pub streams: Vec<Stream>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct Stream {
     #[serde(rename = "stream")]
     pub name: String,
@@ -160,6 +162,32 @@ streams:
         let s = "version: 2\nstreams: []\n";
         let err = Manifest::from_str(s, p()).expect_err("error");
         assert!(matches!(err, ManifestError::UnsupportedVersion(2)));
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_field() {
+        let s = r#"
+version: 1
+streams: []
+generated_by: stream-catalog
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+        assert!(err.to_string().contains("unknown field `generated_by`"));
+    }
+
+    #[test]
+    fn rejects_unknown_stream_field() {
+        let s = r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    subscribee: [role:operator]
+"#;
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        assert!(matches!(err, ManifestError::Parse { .. }));
+        assert!(err.to_string().contains("unknown field `subscribee`"));
     }
 
     #[test]
