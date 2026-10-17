@@ -40,6 +40,31 @@ Authorization: Bearer <push-token>
 { "events": [ {...}, {...}, ... ] }
 ```
 
+### Opt-in producer overload signal
+
+By default every authenticated HTTP producer request is accepted for
+validation and immediate, non-blocking dispatch. To make a pod signal
+that it has exhausted a configured ingress budget, set
+`WSS_MUX_PUSH_OVERLOAD_RATE` above zero:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_OVERLOAD_RATE` | `0` | shared refill rate for authenticated `/events` and `/events/batch` requests per process; `0` disables the feature entirely |
+| `WSS_MUX_PUSH_OVERLOAD_BURST` | `2 × RATE` | shared token-bucket capacity; must be greater than zero when the feature is enabled |
+
+The bucket is process-wide rather than per producer identity: it is a
+pod-capacity signal, not a producer quota. A request arriving after the
+bucket empties receives `503 Service Unavailable`, `Retry-After` as a
+whole number of seconds until one token refills, and `Connection:
+close`. It is not envelope-validated, dispatched, or relayed. Producer
+clients should wait at least the advertised duration and retry through
+their normal load-balancer path.
+
+Only an authenticated producer request spends a token. The internal
+peer-relay receipt endpoint is excluded so one-hop delivery remains
+best-effort and never recursively adds producer backpressure. Metric:
+`wss_mux_push_overload_rejected_total`.
+
 Responses:
 
 - `204 No Content` on success.
@@ -48,6 +73,8 @@ Responses:
 - `413 Payload Too Large` if any event exceeds its stream's
   `max_payload_bytes` cap. In a batch this rejects the whole batch
   (all-or-nothing); nothing is dispatched.
+- `503 Service Unavailable` with `Retry-After` and `Connection: close`
+  when the opt-in producer overload bucket is empty.
 
 ### Custom envelope shape
 

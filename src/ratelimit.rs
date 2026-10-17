@@ -41,6 +41,49 @@ impl TokenBucket {
             false
         }
     }
+
+    /// Spend one token or return the time until the next token becomes
+    /// available. The delay is rounded up to a whole second because HTTP
+    /// `Retry-After` uses integer seconds in wss-mux's overload response.
+    pub fn try_take_or_retry_after(&mut self, now: Instant) -> Result<(), Duration> {
+        if self.try_take(now) {
+            return Ok(());
+        }
+
+        // Callers construct a retrying limiter only with a positive refill
+        // rate. Keep the fallback finite for direct unit-test construction
+        // and for a deliberate zero-capacity shed configuration.
+        if self.refill_per_sec == 0.0 {
+            return Err(Duration::from_secs(1));
+        }
+        let seconds = ((1.0 - self.tokens) / self.refill_per_sec).ceil().max(1.0);
+        Err(Duration::from_secs(seconds as u64))
+    }
+}
+
+/// A single process-wide token bucket for HTTP producer requests. It is
+/// intentionally not keyed by a producer identity: this models the capacity
+/// of one pod and gives any producer the same explicit overload signal.
+#[derive(Debug)]
+pub struct PushOverloadLimiter {
+    bucket: Mutex<TokenBucket>,
+}
+
+impl PushOverloadLimiter {
+    pub fn new(capacity: u32, refill_per_sec: u32) -> Self {
+        Self {
+            bucket: Mutex::new(TokenBucket::new(capacity, refill_per_sec, Instant::now())),
+        }
+    }
+
+    /// Admit one producer request, or return the whole-second `Retry-After`
+    /// value for a rejected request.
+    pub fn try_take(&self, now: Instant) -> Result<(), Duration> {
+        self.bucket
+            .lock()
+            .expect("push overload bucket mutex poisoned")
+            .try_take_or_retry_after(now)
+    }
 }
 
 /// A keyed pool of token buckets — one bucket per source identifier.
@@ -185,6 +228,21 @@ mod tests {
         let mut b = TokenBucket::new(0, 5, t0);
         assert!(!b.try_take(t0));
         assert!(!b.try_take(t0 + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn rejected_take_reports_time_until_next_token() {
+        let t0 = Instant::now();
+        let mut b = TokenBucket::new(1, 2, t0);
+        assert!(b.try_take_or_retry_after(t0).is_ok());
+        assert_eq!(
+            b.try_take_or_retry_after(t0),
+            Err(Duration::from_secs(1)),
+            "half a second rounds up for Retry-After"
+        );
+        assert!(b
+            .try_take_or_retry_after(t0 + Duration::from_millis(500))
+            .is_ok());
     }
 
     #[test]
