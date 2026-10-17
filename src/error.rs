@@ -115,9 +115,10 @@ impl ProtocolError {
 }
 
 #[cfg(test)]
-// Characterization coverage: this PR adds assertions for pre-existing
-// ProtocolError wire behavior and no production code in this module. See the
-// "Test development record" in the pull request description.
+// TDD exception class: test-only contract characterization. This PR adds
+// assertions for pre-existing ProtocolError wire behavior and no production
+// code in this module. See the "Test development record" in the pull request
+// description.
 mod tests {
     use super::*;
 
