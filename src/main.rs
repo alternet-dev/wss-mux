@@ -107,9 +107,10 @@ async fn try_serve() -> anyhow::Result<()> {
 
 /// Keep the peer set fresh. Membership is polled (not per-relay
 /// delivery): re-resolve discovery every `WSS_MUX_PEER_DNS_REFRESH_SECS`
-/// so scale-up/down propagates within a tight window. A static
-/// `WSS_MUX_PEERS` fleet is fixed — set once, never polled. Relay
-/// disabled (`WSS_MUX_PEER_RELAY=off`) ⇒ task not spawned, no DNS query.
+/// so scale-up/down propagates within a tight window. Static
+/// `WSS_MUX_PEERS` skip DNS but remain on the loop so selective-relay
+/// interest stays fresh. Relay disabled (`WSS_MUX_PEER_RELAY=off`) ⇒
+/// task not spawned, no DNS query or interest request.
 fn spawn_peer_refresher(state: AppState) {
     let peer_cfg = state.config().peers.clone();
     if !peer_cfg.relay_enabled {
@@ -122,10 +123,8 @@ fn spawn_peer_refresher(state: AppState) {
             let peers = wss_mux::peers::discover(&peer_cfg, self_port).await;
             let count = peers.len();
             state.set_peers(peers);
+            wss_mux::server::relay::refresh_peer_interests(&state).await;
             tracing::debug!(peers = count, "peer set refreshed");
-            if !peer_cfg.static_peers.is_empty() {
-                return; // fixed fleet — no polling
-            }
             tokio::time::sleep(peer_cfg.dns_refresh).await;
         }
     });

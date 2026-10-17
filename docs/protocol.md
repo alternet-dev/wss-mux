@@ -341,6 +341,68 @@ lockstep model) rather than negotiated. Breaking wire changes between
 releases are documented in the CHANGELOG; clients pinned to a server
 release are paired with a server that speaks the same wire.
 
+## Internal peer interest protocol
+
+Streams may opt into selective cross-instance relay in the manifest:
+
+```yaml
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    selective_relay: true
+```
+
+`selective_relay` defaults to `false`, preserving unconditional relay
+for every existing manifest. The setting changes only which discovered
+peers receive an event; local dispatch, producer responses, and the
+one-hop relay receipt path are unchanged.
+
+When at least one local stream is selective, an instance periodically
+asks each discovered peer for its aggregate interest with
+`POST /internal/interest`. The request and response are CBOR and use the
+same bearer token as `POST /internal/relay`.
+
+Request:
+
+```text
+{ "streams": ["chat_messages", "tenant_events"] }
+```
+
+Response:
+
+```text
+{
+  "streams": [
+    { "stream": "chat_messages", "all_keys": true, "keys": [] },
+    {
+      "stream": "tenant_events",
+      "all_keys": false,
+      "keys": ["tenant-1", "tenant-2"]
+    }
+  ]
+}
+```
+
+An omitted stream has no local subscribers. `all_keys: true` means a
+keyless subscription admits every event on the stream. Otherwise an
+event is wanted only when its key appears in `keys`; a keyless event is
+not wanted by key-specific subscriptions. Advertisements contain no
+connection IDs, subscriber identities, or subscription counts.
+
+The key set is bounded at 4,096 distinct keys per stream. If a stream
+exceeds the bound, its advertisement uses `all_keys: true`, deliberately
+allowing extra relay traffic instead of dropping a potentially wanted
+event. Missing, invalid, unauthorized, or unreachable interest responses
+are also treated as unknown and fail open to unconditional relay. This
+makes rolling upgrades and temporary coordination failures delivery-safe.
+
+Interest is refreshed on `WSS_MUX_PEER_DNS_REFRESH_SECS`. A new
+subscription can therefore take up to one refresh interval to become
+visible to senders; a removed subscription can receive unnecessary
+relays for the same interval. This bounded staleness is part of the
+best-effort, at-most-once peer-relay contract.
+
 ## Forward compatibility
 
 Until v1.0, the protocol may break between minor versions. The
