@@ -25,6 +25,11 @@ pub enum AuthError {
     Invalid(String),
 }
 
+/// Clock-drift tolerance for `exp` and `nbf` validation in seconds.
+/// `jsonwebtoken` defaults to 60; both validation paths here zero it so
+/// no expired token is accepted within the library's default window.
+const LEEWAY_SECS: u64 = 0;
+
 /// Decode `Claims` with the algorithm **pinned** to `alg` and verified
 /// against `key`. The token's own `alg` header never widens what's
 /// accepted — it only ever selects *which* configured key (see
@@ -33,7 +38,7 @@ pub enum AuthError {
 fn decode_claims(token: &str, key: &DecodingKey, alg: Algorithm) -> Result<Claims, AuthError> {
     let mut validation = Validation::new(alg);
     validation.set_required_spec_claims(&["iss", "iat", "exp", "sub"]);
-    validation.leeway = 0;
+    validation.leeway = LEEWAY_SECS;
     match decode::<Claims>(token, key, &validation) {
         Ok(data) => Ok(data.claims),
         Err(err) => match err.kind() {
@@ -151,7 +156,7 @@ impl OidcVerifier {
         v.set_audience(&[&self.audience]);
         v.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         v.validate_nbf = true;
-        v.leeway = 0;
+        v.leeway = LEEWAY_SECS;
         let data = decode::<Value>(token, &key, &v).map_err(|e| match e.kind() {
             ErrorKind::ExpiredSignature => AuthError::Expired,
             other => AuthError::Invalid(format!("{other:?}")),
