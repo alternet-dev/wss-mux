@@ -497,6 +497,12 @@ mod tests {
         .unwrap()
     }
 
+    // Returns one snapshot per call. Capture it once and reuse both the
+    // signing call and the assertion; calling twice risks an iat/exp
+    // rollover between them, which intermittently panics:
+    //   assertion `left == right` failed
+    //     left: Claims { iat: N+1, exp: N+301, .. }
+    //    right: Claims { iat: N,   exp: N+300, .. }
     fn fresh_claims() -> Claims {
         let n = now();
         Claims {
