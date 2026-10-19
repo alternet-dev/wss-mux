@@ -554,6 +554,27 @@ mod tests {
     }
 
     #[test]
+    fn token_expired_within_jsonwebtoken_default_leeway_is_still_rejected() {
+        // jsonwebtoken defaults leeway to 60 seconds; decode_claims zeroes
+        // it so a token expired 30 seconds ago is immediately invalid.
+        // This assertion fails if validation.leeway is not set to zero.
+        let n = now();
+        let claims = Claims {
+            iss: "test-app".into(),
+            iat: n - 330,
+            exp: n - 30,
+            sub: "user:alice".into(),
+            principals: vec!["role:member".into(), "user:alice".into()],
+        };
+        let token = sign(&claims, KEY);
+        let v = HandshakeVerifier::new(Some(KEY), None).expect("hs256 verifier");
+        assert!(
+            matches!(v.validate(&token), Err(AuthError::Expired)),
+            "token expired 30 s ago must be Expired with zero leeway"
+        );
+    }
+
+    #[test]
     fn missing_required_claim_is_invalid() {
         #[derive(Serialize)]
         struct Partial {
