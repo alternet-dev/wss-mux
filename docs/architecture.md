@@ -202,11 +202,11 @@ occupancy is near zero outside fanout bursts.
 
 - **Storage.** No database, no embedded KV.
 - **Replicated state.** Instances share no subscription/connection
-  state. The one cross-instance mechanism is peer-relay (v0.3): an
-  instance relays a producer push once to its DNS-discovered peers so
-  each fans out to its own clients — best-effort, one-hop, no gossip,
-  no shared state. Resolving no peers ⇒ inert (single-instance
-  behaviour). In v0.5 the relay can optionally coalesce:
+  identities, counts, or durable state. The cross-instance mechanism is
+  peer-relay (v0.3): an instance relays a producer push once to its
+  DNS-discovered peers so each fans out to its own clients —
+  best-effort, one-hop, no gossip. Resolving no peers ⇒ inert
+  (single-instance behavior). In v0.5 the relay can optionally coalesce:
   `WSS_MUX_RELAY_COALESCE_MS > 0` batches per-push relays through a
   bounded queue drained by a single **supervised** flush task (a
   panic is metered `wss_mux_relay_flush_restarts_total` and the task
@@ -215,7 +215,14 @@ occupancy is near zero outside fanout bursts.
   stream-sparsity is observable as
   `wss_mux_relay_events_unwanted_total` (peer-origin events with no
   local subscriber) over `wss_mux_relay_events_relayed_total`. See
-  `docs/operations.md`.
+  `docs/operations.md`. A stream can opt into selective relay: peers
+  expose bounded, aggregate stream/key interest snapshots, and senders
+  cache them for one discovery interval. These snapshots carry no
+  subscriber identity or count, fail open when unavailable, and are
+  never persisted. `wss_mux_relay_events_skipped_total` counts the
+  event-peer deliveries suppressed by a known non-matching snapshot;
+  `wss_mux_relay_interest_refresh_total{result}` reports whether peer
+  snapshots remain available.
 - **Token issuance.** Only validation.
 - **Producer adapters.** No Kafka consumer, no Redis subscriber.
 - **TLS termination.** Client-edge TLS is done at the reverse proxy

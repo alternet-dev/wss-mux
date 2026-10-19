@@ -6,8 +6,15 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
 use crate::envelope::EventEnvelope;
-use crate::server::metrics::{RelayFailure, RelayFailureLabel};
+use crate::peers::PeerUrl;
+use crate::registry::Registry;
+use crate::server::metrics::{RelayFailure, RelayFailureLabel, ReloadResult, ReloadResultLabel};
 use crate::server::AppState;
+
+/// Maximum exact keys advertised for one stream. Above this bound the
+/// peer advertises `all_keys`, preserving delivery while bounding each
+/// cached snapshot.
+pub const MAX_INTEREST_KEYS_PER_STREAM: usize = 4096;
 
 /// Internal relay body: a batch of already-canonical envelopes,
 /// CBOR-encoded. Independent of the producer-facing `WSS_MUX_ENVELOPE_*`
@@ -17,6 +24,104 @@ use crate::server::AppState;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelayBatch {
     pub events: Vec<EventEnvelope>,
+}
+
+/// Streams for which a sender wants aggregate peer interest. Keeping
+/// this request explicit avoids advertising unused non-selective
+/// streams and stays safe across mixed-manifest rolling deploys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterestRequest {
+    pub streams: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamInterest {
+    pub stream: String,
+    pub all_keys: bool,
+    pub keys: Vec<String>,
+}
+
+/// Aggregate, identity-free subscription interest advertised by one
+/// peer. An absent stream means that peer has no matching subscriber.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterestSnapshot {
+    pub streams: Vec<StreamInterest>,
+}
+
+impl InterestSnapshot {
+    pub fn from_registry(registry: &Registry, requested: &[String]) -> Self {
+        let streams = requested
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .filter_map(|stream| {
+                registry
+                    .interest(stream, MAX_INTEREST_KEYS_PER_STREAM)
+                    .map(|interest| StreamInterest {
+                        stream: stream.clone(),
+                        all_keys: interest.all_keys,
+                        keys: interest.keys,
+                    })
+            })
+            .collect();
+        Self { streams }
+    }
+
+    /// Restrict an untrusted peer response to requested streams, sort
+    /// and deduplicate keys, and collapse oversized data to fail-open
+    /// wildcard interest.
+    fn sanitize(self, requested: &[String]) -> Self {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let requested: BTreeSet<&str> = requested.iter().map(String::as_str).collect();
+        let mut merged: BTreeMap<String, StreamInterest> = BTreeMap::new();
+        for mut interest in self.streams {
+            if !requested.contains(interest.stream.as_str()) {
+                continue;
+            }
+            interest.keys.sort();
+            interest.keys.dedup();
+            if interest.keys.len() > MAX_INTEREST_KEYS_PER_STREAM {
+                interest.all_keys = true;
+                interest.keys.clear();
+            }
+            let entry = merged
+                .entry(interest.stream.clone())
+                .or_insert_with(|| StreamInterest {
+                    stream: interest.stream.clone(),
+                    all_keys: false,
+                    keys: Vec::new(),
+                });
+            if interest.all_keys {
+                entry.all_keys = true;
+                entry.keys.clear();
+            } else if !entry.all_keys {
+                entry.keys.extend(interest.keys);
+                entry.keys.sort();
+                entry.keys.dedup();
+                if entry.keys.len() > MAX_INTEREST_KEYS_PER_STREAM {
+                    entry.all_keys = true;
+                    entry.keys.clear();
+                }
+            }
+        }
+        Self {
+            streams: merged.into_values().collect(),
+        }
+    }
+
+    pub fn wants(&self, event: &EventEnvelope) -> bool {
+        self.streams.iter().any(|interest| {
+            interest.stream == event.stream
+                && (interest.all_keys
+                    || event.key.as_ref().is_some_and(|key| {
+                        interest
+                            .keys
+                            .binary_search_by(|candidate| candidate.as_str().cmp(key.as_str()))
+                            .is_ok()
+                    }))
+        })
+    }
 }
 
 /// Fire-and-forget relay of a producer batch to every discovered peer.
@@ -43,62 +148,89 @@ pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
         return;
     }
 
-    // Coalescing off: pre-v0.5 direct per-push spawn (unchanged).
+    // Coalescing off: direct per-push task. Filtering and network I/O
+    // remain detached from the producer path.
+    let state = state.clone();
+    tokio::spawn(async move {
+        send_events_to_peers(&state, peers.as_ref(), &batch.events, usize::MAX).await;
+    });
+}
+
+/// Refresh aggregate interest for the current peer set. Invalid,
+/// unavailable, or non-success responses remove the cached entry so
+/// relay falls back to unconditional broadcast. This is also the
+/// rolling-upgrade path for peers that do not yet expose the endpoint.
+pub async fn refresh_peer_interests(state: &AppState) {
+    let Some(manifest) = state.manifest() else {
+        state.clear_peer_interests();
+        return;
+    };
+    let streams: Vec<String> = manifest
+        .streams
+        .iter()
+        .filter(|stream| stream.selective_relay)
+        .map(|stream| stream.name.clone())
+        .collect();
+    if streams.is_empty() {
+        state.clear_peer_interests();
+        return;
+    }
+
+    let peers = state.peers();
+    if peers.is_empty() {
+        state.clear_peer_interests();
+        return;
+    }
+    let request = InterestRequest {
+        streams: streams.clone(),
+    };
     let mut body = Vec::new();
-    if ciborium::into_writer(&batch, &mut body).is_err() {
-        state
-            .metrics()
-            .relay_failed
-            .get_or_create(&RelayFailureLabel {
-                reason: RelayFailure::Other,
-            })
-            .inc();
+    if ciborium::into_writer(&request, &mut body).is_err() {
+        state.clear_peer_interests();
         return;
     }
 
     let client = state.relay_client().clone();
     let token = state.config().push_auth_token.clone();
-    let state = state.clone();
-    tokio::spawn(async move {
-        for peer in peers.iter() {
-            let url = format!("{}/internal/relay", peer.base());
-            let result = client
-                .post(&url)
-                .bearer_auth(&token)
+    let fetches = peers.iter().cloned().map(|peer| {
+        let client = client.clone();
+        let token = token.clone();
+        let body = body.clone();
+        let streams = streams.clone();
+        async move {
+            let response = client
+                .post(format!("{}/internal/interest", peer.base()))
+                .bearer_auth(token)
                 .header(header::CONTENT_TYPE, "application/cbor")
-                .body(body.clone())
+                .body(body)
                 .send()
                 .await;
-            match result {
-                Ok(resp) if resp.status().is_success() => {
-                    state.metrics().relay_sent.inc();
-                }
-                Ok(_) => {
-                    state
-                        .metrics()
-                        .relay_failed
-                        .get_or_create(&RelayFailureLabel {
-                            reason: RelayFailure::Status,
-                        })
-                        .inc();
-                }
-                Err(e) => {
-                    let reason = if e.is_timeout() {
-                        RelayFailure::Timeout
-                    } else if e.is_connect() {
-                        RelayFailure::Connect
-                    } else {
-                        RelayFailure::Other
-                    };
-                    state
-                        .metrics()
-                        .relay_failed
-                        .get_or_create(&RelayFailureLabel { reason })
-                        .inc();
-                }
-            }
+            let snapshot = match response {
+                Ok(response) if response.status().is_success() => match response.bytes().await {
+                    Ok(bytes) => ciborium::from_reader::<InterestSnapshot, _>(bytes.as_ref())
+                        .ok()
+                        .map(|snapshot| snapshot.sanitize(&streams)),
+                    Err(_) => None,
+                },
+                _ => None,
+            };
+            (peer, snapshot)
         }
     });
+    for (peer, snapshot) in futures_util::future::join_all(fetches).await {
+        state
+            .metrics()
+            .relay_interest_refresh
+            .get_or_create(&ReloadResultLabel {
+                result: if snapshot.is_some() {
+                    ReloadResult::Ok
+                } else {
+                    ReloadResult::Error
+                },
+            })
+            .inc();
+        state.set_peer_interest(&peer, snapshot);
+    }
 }
 
 /// Spawn the relay flush task. No-op if coalescing is off (rx
@@ -153,29 +285,66 @@ async fn flush_to_peers(state: &AppState, events: Vec<EventEnvelope>, max_events
     if peers.is_empty() || events.is_empty() {
         return;
     }
+    send_events_to_peers(state, peers.as_ref(), &events, max_events).await;
+}
+
+/// Filter and POST one event set independently for every peer. A peer
+/// with no valid interest snapshot receives the full set (fail open).
+async fn send_events_to_peers(
+    state: &AppState,
+    peers: &[PeerUrl],
+    events: &[EventEnvelope],
+    max_events: usize,
+) {
     let client = state.relay_client().clone();
     let token = state.config().push_auth_token.clone();
-    for chunk in events.chunks(max_events) {
-        let batch = RelayBatch {
-            events: chunk.to_vec(),
-        };
-        let mut body = Vec::new();
-        if ciborium::into_writer(&batch, &mut body).is_err() {
-            state
-                .metrics()
-                .relay_failed
-                .get_or_create(&RelayFailureLabel {
-                    reason: RelayFailure::Other,
-                })
-                .inc();
-            continue;
-        }
-        let sends = peers.iter().map(|p| {
-            let url = format!("{}/internal/relay", p.base());
+    let manifest = state.manifest();
+    let mut sends = Vec::new();
+    for peer in peers {
+        let interest = state.peer_interest(peer);
+        let filtered: Vec<EventEnvelope> = events
+            .iter()
+            .filter_map(|event| {
+                let selective = manifest
+                    .as_ref()
+                    .and_then(|manifest| manifest.stream(&event.stream))
+                    .is_some_and(|stream| stream.selective_relay);
+                if selective
+                    && interest
+                        .as_ref()
+                        .is_some_and(|snapshot| !snapshot.wants(event))
+                {
+                    state.metrics().relay_events_skipped.inc();
+                    None
+                } else {
+                    Some(event.clone())
+                }
+            })
+            .collect();
+
+        for chunk in filtered.chunks(max_events.max(1)) {
+            let mut body = Vec::new();
+            if ciborium::into_writer(
+                &RelayBatch {
+                    events: chunk.to_vec(),
+                },
+                &mut body,
+            )
+            .is_err()
+            {
+                state
+                    .metrics()
+                    .relay_failed
+                    .get_or_create(&RelayFailureLabel {
+                        reason: RelayFailure::Other,
+                    })
+                    .inc();
+                continue;
+            }
+            let url = format!("{}/internal/relay", peer.base());
             let client = client.clone();
             let token = token.clone();
-            let body = body.clone();
-            async move {
+            sends.push(async move {
                 client
                     .post(&url)
                     .bearer_auth(&token)
@@ -183,36 +352,37 @@ async fn flush_to_peers(state: &AppState, events: Vec<EventEnvelope>, max_events
                     .body(body)
                     .send()
                     .await
+            });
+        }
+    }
+
+    for result in futures_util::future::join_all(sends).await {
+        match result {
+            Ok(resp) if resp.status().is_success() => {
+                state.metrics().relay_sent.inc();
             }
-        });
-        for result in futures_util::future::join_all(sends).await {
-            match result {
-                Ok(resp) if resp.status().is_success() => {
-                    state.metrics().relay_sent.inc();
-                }
-                Ok(_) => {
-                    state
-                        .metrics()
-                        .relay_failed
-                        .get_or_create(&RelayFailureLabel {
-                            reason: RelayFailure::Status,
-                        })
-                        .inc();
-                }
-                Err(e) => {
-                    let reason = if e.is_timeout() {
-                        RelayFailure::Timeout
-                    } else if e.is_connect() {
-                        RelayFailure::Connect
-                    } else {
-                        RelayFailure::Other
-                    };
-                    state
-                        .metrics()
-                        .relay_failed
-                        .get_or_create(&RelayFailureLabel { reason })
-                        .inc();
-                }
+            Ok(_) => {
+                state
+                    .metrics()
+                    .relay_failed
+                    .get_or_create(&RelayFailureLabel {
+                        reason: RelayFailure::Status,
+                    })
+                    .inc();
+            }
+            Err(e) => {
+                let reason = if e.is_timeout() {
+                    RelayFailure::Timeout
+                } else if e.is_connect() {
+                    RelayFailure::Connect
+                } else {
+                    RelayFailure::Other
+                };
+                state
+                    .metrics()
+                    .relay_failed
+                    .get_or_create(&RelayFailureLabel { reason })
+                    .inc();
             }
         }
     }
@@ -365,5 +535,76 @@ mod tests {
         ciborium::into_writer(&batch, &mut buf).expect("cbor encode");
         let back: RelayBatch = ciborium::from_reader(&buf[..]).expect("cbor decode");
         assert_eq!(back, batch);
+    }
+
+    #[test]
+    fn interest_snapshot_matches_wildcard_and_exact_keys() {
+        let snapshot = InterestSnapshot {
+            streams: vec![
+                StreamInterest {
+                    stream: "all".into(),
+                    all_keys: true,
+                    keys: vec![],
+                },
+                StreamInterest {
+                    stream: "keyed".into(),
+                    all_keys: false,
+                    keys: vec!["a".into(), "b".into()],
+                },
+            ],
+        };
+        let event = |stream: &str, key: Option<&str>| EventEnvelope {
+            stream: stream.into(),
+            key: key.map(str::to_string),
+            payload: serde_json::json!({}),
+        };
+        assert!(snapshot.wants(&event("all", None)));
+        assert!(snapshot.wants(&event("all", Some("anything"))));
+        assert!(snapshot.wants(&event("keyed", Some("b"))));
+        assert!(!snapshot.wants(&event("keyed", Some("c"))));
+        assert!(!snapshot.wants(&event("keyed", None)));
+        assert!(!snapshot.wants(&event("missing", Some("a"))));
+    }
+
+    #[test]
+    fn sanitizing_oversized_peer_interest_fails_open() {
+        let snapshot = InterestSnapshot {
+            streams: vec![StreamInterest {
+                stream: "s".into(),
+                all_keys: false,
+                keys: (0..=MAX_INTEREST_KEYS_PER_STREAM)
+                    .map(|i| format!("key-{i}"))
+                    .collect(),
+            }],
+        }
+        .sanitize(&["s".into()]);
+        assert_eq!(snapshot.streams.len(), 1);
+        assert!(snapshot.streams[0].all_keys);
+        assert!(snapshot.streams[0].keys.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failed_interest_refresh_clears_snapshot_to_fail_open() {
+        let mut config = coalescing_config();
+        config.relay_coalesce_ms = 0;
+        let state = AppState::new(config);
+        state.set_manifest(
+            crate::manifest::Manifest::from_str(
+                "version: 1\nstreams:\n  - stream: s\n    subscribe: [role:x]\n    selective_relay: true\n",
+                std::path::Path::new("test.yaml"),
+            )
+            .expect("manifest"),
+        );
+        let peer = a_peer();
+        state.set_peers(vec![peer.clone()]);
+        state.set_peer_interest(&peer, Some(InterestSnapshot::default()));
+        assert!(state.peer_interest(&peer).is_some());
+
+        refresh_peer_interests(&state).await;
+        assert!(state.peer_interest(&peer).is_none());
+        assert!(state
+            .metrics()
+            .encode()
+            .contains("wss_mux_relay_interest_refresh_total{result=\"error\"} 1"));
     }
 }

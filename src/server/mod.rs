@@ -25,7 +25,7 @@ use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
 use crate::ratelimit::{PerSourceRateLimiter, PushOverloadLimiter};
 use crate::registry::Registry;
-use crate::server::relay::RelayBatch;
+use crate::server::relay::{InterestSnapshot, RelayBatch};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -42,6 +42,10 @@ struct Inner {
     // watch pattern as the manifest: cheap borrow() on the relay path,
     // single writer (the refresh task / tests via set_peers).
     peers_tx: watch::Sender<Arc<Vec<PeerUrl>>>,
+    // Latest valid aggregate interest advertised by each peer, keyed
+    // by peer base URL. A missing entry means unknown and therefore
+    // fail-open broadcast on selective streams.
+    peer_interests: DashMap<String, Arc<InterestSnapshot>>,
     // Built once at startup from PeerConfig (timeout + optional TLS).
     relay_client: reqwest::Client,
     // Built once at startup from the configured handshake key(s); a
@@ -143,6 +147,7 @@ impl AppState {
                 config,
                 manifest_tx,
                 peers_tx,
+                peer_interests: DashMap::new(),
                 relay_client,
                 handshake_verifier,
                 oidc_verifier,
@@ -224,8 +229,39 @@ impl AppState {
     /// publishes the `wss_mux_peers_known` gauge so it tracks the live
     /// set from a single place.
     pub fn set_peers(&self, peers: Vec<PeerUrl>) {
+        let live: std::collections::HashSet<String> = peers.iter().map(PeerUrl::base).collect();
+        self.inner
+            .peer_interests
+            .retain(|base, _| live.contains(base));
         self.inner.metrics.peers_known.set(peers.len() as i64);
         self.inner.peers_tx.send_replace(Arc::new(peers));
+    }
+
+    /// Install a peer's latest valid aggregate-interest snapshot, or
+    /// remove it when refresh failed so selective routing fails open.
+    pub fn set_peer_interest(&self, peer: &PeerUrl, interest: Option<InterestSnapshot>) {
+        let base = peer.base();
+        match interest {
+            Some(snapshot) => {
+                self.inner.peer_interests.insert(base, Arc::new(snapshot));
+            }
+            None => {
+                self.inner.peer_interests.remove(&base);
+            }
+        }
+    }
+
+    /// Latest valid aggregate interest for a peer. `None` means the
+    /// sender must relay unconditionally for delivery safety.
+    pub fn peer_interest(&self, peer: &PeerUrl) -> Option<Arc<InterestSnapshot>> {
+        self.inner
+            .peer_interests
+            .get(&peer.base())
+            .map(|entry| entry.clone())
+    }
+
+    pub fn clear_peer_interests(&self) {
+        self.inner.peer_interests.clear();
     }
 
     /// Current OIDC JWKS snapshot. Cheap `Arc` clone, independent of a
@@ -349,6 +385,7 @@ pub fn build_app(state: AppState) -> Router {
         .route("/events", post(http::push_event))
         .route("/events/batch", post(http::push_batch))
         .route("/events/:stream", get(http::sse_read))
+        .route("/internal/interest", post(http::relay_interest))
         .route("/internal/relay", post(http::relay_receive))
         .route("/stream", get(ws::ws_handler))
         .with_state(state)
