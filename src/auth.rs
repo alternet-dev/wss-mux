@@ -26,8 +26,9 @@ pub enum AuthError {
 }
 
 /// Clock-drift tolerance for `exp` and `nbf` validation in seconds.
-/// `jsonwebtoken` defaults to 60; both validation paths here zero it so
-/// no expired token is accepted within the library's default window.
+/// Extracts the literal `0` already used in both validation paths before
+/// this constant existed. `jsonwebtoken` defaults to 60; both paths set
+/// it to zero so no expired token is accepted within that window.
 const LEEWAY_SECS: u64 = 0;
 
 /// Decode `Claims` with the algorithm **pinned** to `alg` and verified
@@ -506,8 +507,8 @@ mod tests {
     // signing call and the assertion; calling twice risks an iat/exp
     // rollover between them, which intermittently panics:
     //   assertion `left == right` failed
-    //     left: Claims { iat: N+1, exp: N+301, .. }
-    //    right: Claims { iat: N,   exp: N+300, .. }
+    //     left: Claims { iat: N,   exp: N+300, .. }
+    //    right: Claims { iat: N+1, exp: N+301, .. }
     fn fresh_claims() -> Claims {
         let n = now();
         Claims {
@@ -562,7 +563,8 @@ mod tests {
     fn token_expired_within_jsonwebtoken_default_leeway_is_still_rejected() {
         // jsonwebtoken defaults leeway to 60 seconds; decode_claims zeroes
         // it so a token expired 30 seconds ago is immediately invalid.
-        // This assertion fails if validation.leeway is not set to zero.
+        // This assertion fails when leeway is 30 seconds or more (such as
+        // the library default) but does not pin leeway to exactly zero.
         let n = now();
         let claims = Claims {
             iss: "test-app".into(),
