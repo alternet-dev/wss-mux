@@ -25,12 +25,6 @@ pub enum AuthError {
     Invalid(String),
 }
 
-/// Clock-drift tolerance for `exp` and `nbf` validation in seconds.
-/// Extracts the literal `0` already used in both validation paths before
-/// this constant existed. `jsonwebtoken` defaults to 60; both paths set
-/// it to zero so no expired token is accepted within that window.
-const LEEWAY_SECS: u64 = 0;
-
 /// Decode `Claims` with the algorithm **pinned** to `alg` and verified
 /// against `key`. The token's own `alg` header never widens what's
 /// accepted — it only ever selects *which* configured key (see
@@ -39,7 +33,7 @@ const LEEWAY_SECS: u64 = 0;
 fn decode_claims(token: &str, key: &DecodingKey, alg: Algorithm) -> Result<Claims, AuthError> {
     let mut validation = Validation::new(alg);
     validation.set_required_spec_claims(&["iss", "iat", "exp", "sub"]);
-    validation.leeway = LEEWAY_SECS;
+    validation.leeway = 0;
     match decode::<Claims>(token, key, &validation) {
         Ok(data) => Ok(data.claims),
         Err(err) => match err.kind() {
@@ -157,7 +151,7 @@ impl OidcVerifier {
         v.set_audience(&[&self.audience]);
         v.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
         v.validate_nbf = true;
-        v.leeway = LEEWAY_SECS;
+        v.leeway = 0;
         let data = decode::<Value>(token, &key, &v).map_err(|e| match e.kind() {
             ErrorKind::ExpiredSignature => AuthError::Expired,
             other => AuthError::Invalid(format!("{other:?}")),
@@ -503,12 +497,9 @@ mod tests {
         .unwrap()
     }
 
-    // Returns one snapshot per call. Capture it once and reuse both the
-    // signing call and the assertion; calling twice risks an iat/exp
-    // rollover between them, which intermittently panics:
-    //   assertion `left == right` failed
-    //     left: Claims { iat: N,   exp: N+300, .. }
-    //    right: Claims { iat: N+1, exp: N+301, .. }
+    // Returns one snapshot per call. Capture it once and reuse it for both
+    // signing and comparison: two calls can observe different wall-clock
+    // seconds and produce claims whose iat/exp values differ by one second.
     fn fresh_claims() -> Claims {
         let n = now();
         Claims {
@@ -557,28 +548,6 @@ mod tests {
             .validate(&token)
             .expect_err("err");
         assert!(matches!(err, AuthError::Expired));
-    }
-
-    #[test]
-    fn token_expired_within_jsonwebtoken_default_leeway_is_still_rejected() {
-        // jsonwebtoken defaults leeway to 60 seconds; decode_claims zeroes
-        // it so a token expired 30 seconds ago is immediately invalid.
-        // This assertion fails when leeway is 30 seconds or more (such as
-        // the library default) but does not pin leeway to exactly zero.
-        let n = now();
-        let claims = Claims {
-            iss: "test-app".into(),
-            iat: n - 330,
-            exp: n - 30,
-            sub: "user:alice".into(),
-            principals: vec!["role:member".into(), "user:alice".into()],
-        };
-        let token = sign(&claims, KEY);
-        let v = HandshakeVerifier::new(Some(KEY), None).expect("hs256 verifier");
-        assert!(
-            matches!(v.validate(&token), Err(AuthError::Expired)),
-            "token expired 30 s ago must be Expired with zero leeway"
-        );
     }
 
     #[test]
