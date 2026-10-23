@@ -641,6 +641,53 @@ mod tests {
     }
 
     #[test]
+    fn push_rate_defaults_to_disabled() {
+        let cfg = Config::from_getter(env(&minimal())).expect("config");
+        assert_eq!(cfg.push_rate_per_sec, DEFAULT_PUSH_RATE);
+        assert_eq!(cfg.push_burst, 0);
+    }
+
+    #[test]
+    fn enabled_push_rate_defaults_burst_to_twice_rate() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_RATE", "10"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_rate_per_sec, 10);
+        assert_eq!(cfg.push_burst, 20);
+    }
+
+    #[test]
+    fn enabled_push_rate_rejects_zero_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_RATE", "1"));
+        pairs.push(("WSS_MUX_PUSH_BURST", "0"));
+        assert!(matches!(
+            Config::from_getter(env(&pairs)),
+            Err(ConfigError::InvalidPushBurst)
+        ));
+    }
+
+    #[test]
+    fn disabled_push_rate_ignores_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_RATE", "0"));
+        pairs.push(("WSS_MUX_PUSH_BURST", "not-a-number"));
+        let cfg = Config::from_getter(env(&pairs)).expect("disabled push rate config");
+        assert_eq!(cfg.push_rate_per_sec, 0);
+        assert_eq!(cfg.push_burst, 0);
+    }
+
+    #[test]
+    fn push_rate_explicit_burst_overrides_rate_default() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_RATE", "10"));
+        pairs.push(("WSS_MUX_PUSH_BURST", "3"));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_rate_per_sec, 10);
+        assert_eq!(cfg.push_burst, 3);
+    }
+
+    #[test]
     fn push_overload_defaults_to_disabled() {
         let cfg = Config::from_getter(env(&minimal())).expect("config");
         assert_eq!(cfg.push_overload_rate_per_sec, DEFAULT_PUSH_OVERLOAD_RATE);
