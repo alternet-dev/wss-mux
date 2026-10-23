@@ -54,6 +54,12 @@ and `Connection: close`. It is disabled by default and does not gate
 internal peer relay receipts, so it adds no producer backpressure until
 an operator explicitly configures it.
 
+A separate optional keyed bucket provides producer fairness. Each
+validated `X-Producer-Id` has an independent per-process request budget;
+an exhausted identity receives `429` with `Retry-After` while siblings
+remain eligible. Idle buckets are evicted to bound memory, and peer relay
+receipts do not enter the keyed limiter.
+
 `GET /events/:stream` exposes the same event stream as a
 Server-Sent Events response — the consumer story for backends that
 don't want a long-lived WebSocket (a separate `presence_svc`, an
