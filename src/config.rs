@@ -29,6 +29,8 @@ pub const DEFAULT_WS_PUBLISH_IDLE_TTL_SECS: u64 = 300;
 /// `conn:<id>` source key (per-connection limit instead of per-user).
 /// When `true`, such a token is refused with `unauthorized_publish`.
 pub const DEFAULT_WS_PUBLISH_REQUIRE_SUB: bool = false;
+/// Per-producer HTTP push request rate. `0` disables the keyed limiter.
+pub const DEFAULT_PUSH_RATE: u32 = 0;
 /// HTTP producer overload signaling is disabled by default. When set above
 /// zero, each process creates one shared token bucket for `/events` pushes.
 pub const DEFAULT_PUSH_OVERLOAD_RATE: u32 = 0;
@@ -139,6 +141,13 @@ pub struct Config {
     /// A bucket whose `last_seen` is older than this is dropped; the
     /// sweep runs at one-tenth this cadence on a tokio interval task.
     pub ws_publish_idle_ttl: Duration,
+    /// HTTP push request rate limit per producer identity. `0` disables
+    /// the per-producer limiter entirely.
+    pub push_rate_per_sec: u32,
+    /// Token-bucket capacity for each HTTP producer identity. `0` defaults
+    /// to twice `push_rate_per_sec`, capped at `u32::MAX`, when the rate is
+    /// enabled.
+    pub push_burst: u32,
     /// HTTP producer request rate at which this process starts returning an
     /// explicit overload response. `0` disables the feature entirely.
     pub push_overload_rate_per_sec: u32,
@@ -254,6 +263,11 @@ pub enum ConfigError {
         source: ParseIntError,
     },
     #[error(
+        "WSS_MUX_PUSH_BURST must be greater than zero when \
+         WSS_MUX_PUSH_RATE is enabled"
+    )]
+    InvalidPushBurst,
+    #[error(
         "WSS_MUX_PUSH_OVERLOAD_BURST must be greater than zero when \
          WSS_MUX_PUSH_OVERLOAD_RATE is enabled"
     )]
@@ -299,6 +313,8 @@ impl Config {
             ws_publish_burst: 0,
             ws_publish_require_sub: DEFAULT_WS_PUBLISH_REQUIRE_SUB,
             ws_publish_idle_ttl: Duration::from_secs(DEFAULT_WS_PUBLISH_IDLE_TTL_SECS),
+            push_rate_per_sec: DEFAULT_PUSH_RATE,
+            push_burst: 0,
             push_overload_rate_per_sec: DEFAULT_PUSH_OVERLOAD_RATE,
             push_overload_burst: 0,
             relay_coalesce_ms: DEFAULT_RELAY_COALESCE_MS,
@@ -438,6 +454,18 @@ impl Config {
             DEFAULT_WS_PUBLISH_IDLE_TTL_SECS,
         )?);
 
+        let push_rate_per_sec = parse_u32("WSS_MUX_PUSH_RATE", DEFAULT_PUSH_RATE)?;
+        let push_burst = if push_rate_per_sec == 0 {
+            0
+        } else {
+            let default = push_rate_per_sec.saturating_mul(2);
+            let burst = parse_u32("WSS_MUX_PUSH_BURST", default)?;
+            if burst == 0 {
+                return Err(ConfigError::InvalidPushBurst);
+            }
+            burst
+        };
+
         let push_overload_rate_per_sec =
             parse_u32("WSS_MUX_PUSH_OVERLOAD_RATE", DEFAULT_PUSH_OVERLOAD_RATE)?;
         let push_overload_burst = if push_overload_rate_per_sec == 0 {
@@ -550,6 +578,8 @@ impl Config {
             ws_publish_burst,
             ws_publish_require_sub,
             ws_publish_idle_ttl,
+            push_rate_per_sec,
+            push_burst,
             push_overload_rate_per_sec,
             push_overload_burst,
             relay_coalesce_ms,
