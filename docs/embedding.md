@@ -48,8 +48,8 @@ access control.
 
 The value must be 1–128 printable ASCII characters with no whitespace.
 An omitted header resolves to the shared identity `shared`, so existing
-producers keep their current behavior and share one fairness budget when a
-future fairness feature is enabled. For authenticated requests, invalid values
+producers keep their current behavior and share one fairness budget when the
+per-producer push limit is enabled. For authenticated requests, invalid values
 return `400 Bad Request` unless an enabled overload limiter rejects the
 request first. Header validation runs after bearer authentication, so a
 request with missing or invalid credentials returns `401 Unauthorized`
@@ -66,6 +66,36 @@ X-Producer-Id: billing-api
 
 { "events": [ {...}, {...}, ... ] }
 ```
+
+### Opt-in per-producer push limit
+
+`WSS_MUX_PUSH_RATE` enables a token bucket for each `X-Producer-Id` on
+the current process. It limits requests, not events: a single push and a
+batch push each cost one token regardless of the batch length.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_RATE` | `0` | refill rate per producer identity for authenticated `/events` and `/events/batch` requests; `0` disables the feature entirely |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | per-producer token-bucket capacity; must be greater than zero when the feature is enabled |
+
+When one identity exhausts its bucket, its request receives `429 Too
+Many Requests` and `Retry-After` as a whole number of seconds until one
+token refills. The request is not envelope-validated, dispatched, or
+relayed. Other identities continue against independent buckets. An
+omitted `X-Producer-Id` uses the `shared` identity, so all legacy
+producers without the header share one bucket.
+
+The limit is local to each process and disabled by default. Only an
+authenticated external producer request with a valid producer identity
+spends a token. Internal peer-relay receipts are excluded. Idle source
+buckets are evicted, and metrics omit the producer identity label to
+avoid unbounded cardinality: `wss_mux_push_rate_limited_total` counts
+rejections and `wss_mux_push_rate_limit_sources` reports the current
+number of buckets.
+
+If both HTTP push controls are enabled, the process-wide overload bucket
+runs first. A request receives its `503` overload response without
+consulting the per-producer bucket when the process-wide budget is empty.
 
 ### Opt-in producer overload signal
 
@@ -97,6 +127,8 @@ Responses:
 - `204 No Content` on success.
 - `401 Unauthorized` on bad auth.
 - `400 Bad Request` on schema failure.
+- `429 Too Many Requests` with `Retry-After` when the opt-in
+  per-producer push bucket is empty.
 - `413 Payload Too Large` if any event exceeds its stream's
   `max_payload_bytes` cap. In a batch this rejects the whole batch
   (all-or-nothing); nothing is dispatched.
