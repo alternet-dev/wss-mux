@@ -29,7 +29,8 @@ pub const DEFAULT_WS_PUBLISH_IDLE_TTL_SECS: u64 = 300;
 /// `conn:<id>` source key (per-connection limit instead of per-user).
 /// When `true`, such a token is refused with `unauthorized_publish`.
 pub const DEFAULT_WS_PUBLISH_REQUIRE_SUB: bool = false;
-/// Per-producer HTTP push request rate. `0` disables the keyed limiter.
+/// Reserved per-producer HTTP push rate value. This release parses the
+/// setting but does not construct or enforce a keyed limiter.
 pub const DEFAULT_PUSH_RATE: u32 = 0;
 /// HTTP producer overload signaling is disabled by default. When set above
 /// zero, each process creates one shared token bucket for `/events` pushes.
@@ -141,12 +142,12 @@ pub struct Config {
     /// A bucket whose `last_seen` is older than this is dropped; the
     /// sweep runs at one-tenth this cadence on a tokio interval task.
     pub ws_publish_idle_ttl: Duration,
-    /// HTTP push request rate limit per producer identity. `0` disables
-    /// the per-producer limiter entirely.
+    /// Reserved HTTP push rate value per producer identity. This release
+    /// parses the value but does not construct or enforce a keyed limiter.
     pub push_rate_per_sec: u32,
-    /// Token-bucket capacity for each HTTP producer identity. `0` defaults
-    /// to twice `push_rate_per_sec`, capped at `u32::MAX`, when the rate is
-    /// enabled.
+    /// Reserved HTTP push burst value per producer identity. When
+    /// `push_rate_per_sec` is nonzero, an omitted value defaults to twice
+    /// the rate, capped at `u32::MAX`; this release does not enforce it.
     pub push_burst: u32,
     /// HTTP producer request rate at which this process starts returning an
     /// explicit overload response. `0` disables the feature entirely.
