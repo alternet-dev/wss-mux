@@ -159,6 +159,8 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | dotted path to the payload |
 | `WSS_MUX_INBOUND_RATE` | `50` | inbound client-frame rate (frames/sec/conn); `0` disables |
 | `WSS_MUX_INBOUND_BURST` | `100` | inbound token-bucket capacity (burst) |
+| `WSS_MUX_PUSH_RATE` | `0` | reserved per-producer push-rate setting; parsed at startup but not enforced yet |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | reserved burst setting; parsed when `WSS_MUX_PUSH_RATE` is nonzero but not enforced yet |
 | `WSS_MUX_PUSH_OVERLOAD_RATE` | `0` | opt-in, process-wide HTTP producer request rate; exhausted requests receive `503` + `Retry-After` and are not dispatched |
 | `WSS_MUX_PUSH_OVERLOAD_BURST` | `2 × RATE` | producer overload token-bucket capacity; only meaningful when `WSS_MUX_PUSH_OVERLOAD_RATE` is nonzero |
 | `WSS_MUX_PEER_RELAY` | (on) | `off` disables cross-instance relay + discovery |
@@ -197,6 +199,10 @@ Operational notes:
   opt in to a per-pod HTTP producer budget. A saturated pod responds
   `503 Service Unavailable` with `Retry-After` in whole seconds and
   `Connection: close`; the rejected request is never dispatched.
+- **Reserved producer fairness settings.** `WSS_MUX_PUSH_RATE` and
+  `WSS_MUX_PUSH_BURST` establish the startup configuration contract for
+  future per-producer limiting. This release does not enforce them or
+  return `429` responses.
 - **Token validation.** Signed-handshake tokens (HS256 and/or
   Ed25519/EdDSA — the token's `alg` picks the key) *or*, mutually
   exclusively, OIDC: the `auth` token is validated against an OIDC

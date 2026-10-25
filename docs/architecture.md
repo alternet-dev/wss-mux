@@ -54,6 +54,11 @@ and `Connection: close`. It is disabled by default and does not gate
 internal peer relay receipts, so it adds no producer backpressure until
 an operator explicitly configures it.
 
+The configuration layer reserves `WSS_MUX_PUSH_RATE` and
+`WSS_MUX_PUSH_BURST` for a future keyed producer-fairness limiter. This
+release parses and validates those settings but does not construct a keyed
+bucket, reject requests, or emit per-producer limiter metrics.
+
 `GET /events/:stream` exposes the same event stream as a
 Server-Sent Events response — the consumer story for backends that
 don't want a long-lived WebSocket (a separate `presence_svc`, an

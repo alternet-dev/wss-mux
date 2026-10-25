@@ -67,6 +67,24 @@ X-Producer-Id: billing-api
 { "events": [ {...}, {...}, ... ] }
 ```
 
+### Reserved per-producer push settings
+
+This release accepts the following startup settings to establish the
+configuration contract for a future per-producer push limiter. It does not
+currently enforce a per-producer budget: setting these variables does not
+change request handling, produce `429` responses, or add limiter metrics.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_RATE` | `0` | unsigned rate value reserved for future enforcement; a nonzero value causes the burst setting to be parsed |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | unsigned burst value reserved for future enforcement; must be greater than zero when the rate is nonzero |
+
+When `WSS_MUX_PUSH_RATE=0`, the burst setting is ignored. When the rate is
+nonzero and no burst is supplied, the parser defaults the burst to twice the
+rate, saturating at `4,294,967,295`. A supplied rate or active burst that is
+not an unsigned 32-bit integer fails startup; an active burst of zero also
+fails startup.
+
 ### Opt-in producer overload signal
 
 By default every authenticated HTTP producer request is accepted for
