@@ -4,7 +4,10 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use wss_mux::envelope::{ClientFrame, ServerFrame};
+use wss_mux::manifest::Manifest;
 use wss_mux::peers::{PeerUrl, Scheme};
+use wss_mux::server::relay::{refresh_peer_interests, InterestRequest, InterestSnapshot};
+use wss_mux::server::AppState;
 
 use crate::common::{
     connect_ws, poll_metrics_for, poll_until, recv_event, send_frame, sign_token, spawn_server,
@@ -55,6 +58,24 @@ fn cbor_batch(value: &serde_json::Value) -> Vec<u8> {
     let mut buf = Vec::new();
     ciborium::into_writer(value, &mut buf).expect("cbor encode");
     buf
+}
+
+fn selective_state() -> AppState {
+    let state = test_state();
+    state.set_manifest(
+        Manifest::from_str(
+            r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    selective_relay: true
+"#,
+            std::path::Path::new("test.yaml"),
+        )
+        .expect("selective manifest"),
+    );
+    state
 }
 
 #[tokio::test]
@@ -201,6 +222,63 @@ async fn relay_receive_without_manifest_returns_503() {
     assert_eq!(resp.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
 }
 
+#[tokio::test]
+async fn interest_endpoint_requires_auth_and_advertises_aggregate_keys() {
+    let state = selective_state();
+    let addr = spawn_server(state.clone()).await;
+    let client = subscribe(addr).await;
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state.registry().binding_count("chat_messages") == 1
+        })
+        .await,
+        "subscription did not register"
+    );
+
+    let mut body = Vec::new();
+    ciborium::into_writer(
+        &InterestRequest {
+            streams: vec!["chat_messages".into(), "missing".into()],
+        },
+        &mut body,
+    )
+    .expect("encode interest request");
+    let http = reqwest::Client::new();
+    let unauthorized = http
+        .post(format!("http://{addr}/internal/interest"))
+        .body(body.clone())
+        .send()
+        .await
+        .expect("interest request");
+    assert_eq!(unauthorized.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let response = http
+        .post(format!("http://{addr}/internal/interest"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .header("Content-Type", "application/cbor")
+        .body(body)
+        .send()
+        .await
+        .expect("interest request");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("Content-Type")
+            .and_then(|value| value.to_str().ok()),
+        Some("application/cbor")
+    );
+    let bytes = response.bytes().await.expect("interest body");
+    let snapshot: InterestSnapshot =
+        ciborium::from_reader(bytes.as_ref()).expect("decode interest response");
+    assert_eq!(snapshot.streams.len(), 1);
+    assert_eq!(snapshot.streams[0].stream, "chat_messages");
+    assert!(!snapshot.streams[0].all_keys);
+    assert_eq!(snapshot.streams[0].keys, ["room-42"]);
+
+    drop(client);
+}
+
 // ---- Outbound relay (the keystone) ------------------------------
 
 async fn subscribe(addr: SocketAddr) -> Ws {
@@ -270,6 +348,138 @@ async fn producer_push_relays_to_peer_instance() {
         poll_metrics_for(addr_a, "wss_mux_relay_sent_total 1", Duration::from_secs(2)).await,
         "A should have metered exactly one successful relay"
     );
+}
+
+#[tokio::test]
+async fn selective_relay_skips_nonmatching_key_and_sends_matching_key() {
+    let state_a = selective_state();
+    let state_b = selective_state();
+    let addr_a = spawn_server(state_a.clone()).await;
+    let addr_b = spawn_server(state_b.clone()).await;
+    let peer_b = peer(addr_b);
+    state_a.set_peers(vec![peer_b.clone()]);
+
+    let mut client_b = subscribe(addr_b).await;
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state_b.registry().binding_count("chat_messages") == 1
+        })
+        .await,
+        "subscription on B did not register"
+    );
+    refresh_peer_interests(&state_a).await;
+    assert!(state_a.peer_interest(&peer_b).is_some());
+    assert!(state_a
+        .metrics()
+        .encode()
+        .contains("wss_mux_relay_interest_refresh_total{result=\"ok\"} 1"));
+
+    let http = reqwest::Client::new();
+    let skipped = http
+        .post(format!("http://{addr_a}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "stream": "chat_messages", "key": "room-other",
+            "payload": {"n": 1}
+        }))
+        .send()
+        .await
+        .expect("nonmatching push");
+    assert_eq!(skipped.status(), reqwest::StatusCode::NO_CONTENT);
+    assert_no_more_events(&mut client_b, Duration::from_millis(250)).await;
+    assert!(
+        poll_metrics_for(
+            addr_a,
+            "wss_mux_relay_events_skipped_total 1",
+            Duration::from_secs(2)
+        )
+        .await,
+        "sender should meter the skipped peer delivery"
+    );
+
+    let sent = http
+        .post(format!("http://{addr_a}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "stream": "chat_messages", "key": "room-42",
+            "payload": {"n": 2}
+        }))
+        .send()
+        .await
+        .expect("matching push");
+    assert_eq!(sent.status(), reqwest::StatusCode::NO_CONTENT);
+    match recv_event(&mut client_b).await {
+        ServerFrame::Event { payload, .. } => assert_eq!(payload, serde_json::json!({"n": 2})),
+        other => panic!("expected matching relayed event, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn selective_relay_without_interest_snapshot_fails_open() {
+    let state_a = selective_state();
+    let state_b = selective_state();
+    let addr_a = spawn_server(state_a.clone()).await;
+    let addr_b = spawn_server(state_b.clone()).await;
+    state_a.set_peers(vec![peer(addr_b)]);
+
+    let mut client_b = subscribe(addr_b).await;
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state_b.registry().binding_count("chat_messages") == 1
+        })
+        .await,
+        "subscription on B did not register"
+    );
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr_a}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "stream": "chat_messages", "key": "room-42", "payload": {"ok": true}
+        }))
+        .send()
+        .await
+        .expect("push");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    assert!(matches!(
+        recv_event(&mut client_b).await,
+        ServerFrame::Event { .. }
+    ));
+}
+
+#[tokio::test]
+async fn nonselective_stream_ignores_known_empty_interest() {
+    let state_a = test_state_with_manifest();
+    let state_b = test_state_with_manifest();
+    let addr_a = spawn_server(state_a.clone()).await;
+    let addr_b = spawn_server(state_b.clone()).await;
+    let peer_b = peer(addr_b);
+    state_a.set_peers(vec![peer_b.clone()]);
+    state_a.set_peer_interest(&peer_b, Some(InterestSnapshot::default()));
+
+    let mut client_b = subscribe(addr_b).await;
+    assert!(
+        poll_until(Duration::from_secs(2), || {
+            state_b.registry().binding_count("chat_messages") == 1
+        })
+        .await,
+        "subscription on B did not register"
+    );
+
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr_a}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "stream": "chat_messages", "key": "room-42", "payload": {"ok": true}
+        }))
+        .send()
+        .await
+        .expect("push");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+    assert!(matches!(
+        recv_event(&mut client_b).await,
+        ServerFrame::Event { .. }
+    ));
 }
 
 #[tokio::test]

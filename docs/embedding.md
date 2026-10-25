@@ -568,6 +568,30 @@ streams:
   staleness is worse than a gap, set `0` where dropping is never
   acceptable and you accept the memory tradeoff.
 
+### Per-stream selective relay
+
+A multi-instance deployment normally relays every producer event to
+every discovered peer. A stream whose subscribers are sparse across the
+fleet can opt into aggregate peer-interest filtering:
+
+```yaml
+version: 1
+streams:
+  - stream: tenant_events
+    subscribe: [tenant:*]
+    selective_relay: true
+```
+
+Absent or `false` keeps unconditional broadcast. Do not enable this
+automatically: first measure a sustained high
+`wss_mux_relay_events_unwanted_total` / `wss_mux_relay_events_relayed_total`
+ratio on the stream topology. Interest additions take up to
+`WSS_MUX_PEER_DNS_REFRESH_SECS` to reach senders, so a newly subscribed
+peer can miss events during that window; interest removal can cause only
+temporary extra traffic. Missing interest data fails open to broadcast.
+The complete selection and operations model is in
+[docs/operations.md](operations.md#selective-relay-opt-in).
+
 ## Client SDKs
 
 The repo ships two first-party clients that hide the wire protocol
@@ -672,8 +696,8 @@ producer still pushes each event **once**, to any single instance:
 that instance dispatches to its own subscribers and relays the event
 to its discovered peers, so clients on every instance see it. This is
 **peer-relay** — built in, no producer-side broadcast, no external
-infrastructure. The producer contract is identical to the
-single-instance case.
+infrastructure. Streams may opt into selective peer relay as described
+above; the producer contract is identical to the single-instance case.
 
 Running a fleet is therefore an operations concern, not an embedding
 one. [docs/operations.md](operations.md) covers it end to end:

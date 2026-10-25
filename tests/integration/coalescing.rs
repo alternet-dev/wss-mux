@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use wss_mux::manifest::Manifest;
 use wss_mux::peers::{PeerUrl, Scheme};
-use wss_mux::server::relay::{spawn_relay_flusher, RelayBatch};
+use wss_mux::server::relay::{spawn_relay_flusher, InterestSnapshot, RelayBatch, StreamInterest};
 use wss_mux::server::AppState;
 
 use crate::common::{sample_manifest, spawn_server, test_config, PUSH_TOKEN};
@@ -104,4 +105,62 @@ async fn coalescing_off_is_one_post_per_push() {
         5,
         "coalescing off ⇒ one POST per push (byte-identical to pre-v0.5)"
     );
+}
+
+#[tokio::test]
+async fn coalescing_filters_each_peer_by_selective_interest() {
+    let (wanted_addr, wanted_posts, wanted_events) = fake_peer().await;
+    let (empty_addr, empty_posts, empty_events) = fake_peer().await;
+
+    let mut cfg = test_config();
+    cfg.relay_coalesce_ms = 30;
+    cfg.relay_coalesce_max_events = 100;
+    let state = AppState::new(cfg);
+    state.set_manifest(
+        Manifest::from_str(
+            r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    selective_relay: true
+"#,
+            std::path::Path::new("test.yaml"),
+        )
+        .expect("manifest"),
+    );
+    let wanted = peer(wanted_addr);
+    let empty = peer(empty_addr);
+    state.set_peers(vec![wanted.clone(), empty.clone()]);
+    state.set_peer_interest(
+        &wanted,
+        Some(InterestSnapshot {
+            streams: vec![StreamInterest {
+                stream: "chat_messages".into(),
+                all_keys: false,
+                keys: vec!["room-42".into()],
+            }],
+        }),
+    );
+    state.set_peer_interest(&empty, Some(InterestSnapshot::default()));
+    spawn_relay_flusher(state.clone());
+
+    let addr = spawn_server(state).await;
+    let http = reqwest::Client::new();
+    for i in 0..5 {
+        http.post(format!("http://{addr}/events"))
+            .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+            .json(&serde_json::json!({
+                "stream": "chat_messages", "key": "room-42", "payload": {"n": i}
+            }))
+            .send()
+            .await
+            .expect("push");
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    assert_eq!(wanted_events.load(Ordering::SeqCst), 5);
+    assert!(wanted_posts.load(Ordering::SeqCst) >= 1);
+    assert_eq!(empty_events.load(Ordering::SeqCst), 0);
+    assert_eq!(empty_posts.load(Ordering::SeqCst), 0);
 }
