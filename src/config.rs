@@ -719,6 +719,31 @@ mod tests {
     }
 
     #[test]
+    fn push_rate_default_burst_saturates_at_u32_max() {
+        let mut pairs = minimal();
+        let rate = (u32::MAX / 2) + 1;
+        let rate_str = rate.to_string();
+        pairs.push(("WSS_MUX_PUSH_RATE", &rate_str));
+        let cfg = Config::from_getter(env(&pairs)).expect("config");
+        assert_eq!(cfg.push_rate_per_sec, rate);
+        assert_eq!(cfg.push_burst, u32::MAX);
+    }
+
+    #[test]
+    fn enabled_push_rate_rejects_malformed_burst() {
+        let mut pairs = minimal();
+        pairs.push(("WSS_MUX_PUSH_RATE", "10"));
+        pairs.push(("WSS_MUX_PUSH_BURST", "not-a-number"));
+        assert!(matches!(
+            Config::from_getter(env(&pairs)),
+            Err(ConfigError::InvalidUnsigned {
+                var: "WSS_MUX_PUSH_BURST",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn push_overload_defaults_to_disabled() {
         let cfg = Config::from_getter(env(&minimal())).expect("config");
         assert_eq!(cfg.push_overload_rate_per_sec, DEFAULT_PUSH_OVERLOAD_RATE);
