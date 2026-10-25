@@ -403,8 +403,6 @@ Scrape `GET /metrics` (Prometheus/OpenMetrics). Peer-relay signals:
 | `wss_mux_relay_sent_total` | rising with producer traffic | flat while events flow and peers exist |
 | `wss_mux_relay_failed_total{reason}` | ~0 steady state; brief blips on scale-down | sustained/climbing outside a scale event |
 | `wss_mux_events_rejected_total{reason="payload_too_large"}` | 0 | rising — producers exceeding a stream's `max_payload_bytes` |
-| `wss_mux_push_rate_limited_total` | 0 unless the opt-in per-producer budget is intentionally shedding | rising — at least one producer identity is receiving `429`; inspect producer request rates or tune `WSS_MUX_PUSH_RATE` / `_BURST` |
-| `wss_mux_push_rate_limit_sources` | stable near the number of recently active producer identities | sustained growth — producer IDs may be churning faster than idle eviction |
 | `wss_mux_push_overload_rejected_total` | 0 unless the opt-in producer budget is intentionally shedding | rising — producer requests are receiving `503`; lower ingress, add replicas, or raise the configured budget |
 
 `reason` on relay failure is `timeout`, `connect`, `status`, or
@@ -426,7 +424,6 @@ skew); `timeout` means peers are overloaded or
 | Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; bounded by the refresh interval |
 | Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/ready`), or the client side |
 | `413` from `POST /events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |
-| `429` with `Retry-After` from `POST /events` | That `X-Producer-Id` exhausted its opt-in per-process fairness budget | Wait at least `Retry-After`, reduce that producer's request rate, or tune `WSS_MUX_PUSH_RATE` / `_BURST` |
 | `503` with `Retry-After` from `POST /events` | The opt-in per-pod producer budget is exhausted | Wait at least `Retry-After`, retry through the load balancer, then tune `WSS_MUX_PUSH_OVERLOAD_RATE` / `_BURST` or add capacity |
 | Duplicate events at a client | Should not happen (one-hop guard). Almost always an external loop | Ensure nothing re-`POST`s to `/internal/relay`; it is internal-only |
 | Reconnect storm on every deploy | Expected with ephemeral connections on rolling restart | Ensure clients reconnect with jittered backoff and auto-resubscribe |
