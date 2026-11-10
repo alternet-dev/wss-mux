@@ -412,10 +412,8 @@ mod tests {
     #[test]
     fn hs256_only_verifier_accepts_hs256_rejects_eddsa() {
         let v = HandshakeVerifier::new(Some(KEY), None).expect("hs256 verifier");
-        assert_eq!(
-            v.validate(&sign(&fresh_claims(), KEY)).unwrap(),
-            fresh_claims()
-        );
+        let claims = fresh_claims();
+        assert_eq!(v.validate(&sign(&claims, KEY)).unwrap(), claims);
         let ed = sign_ed25519(&fresh_claims(), ED25519_PRIV_PEM);
         assert!(matches!(v.validate(&ed), Err(AuthError::Invalid(_))));
     }
@@ -423,8 +421,9 @@ mod tests {
     #[test]
     fn ed25519_only_verifier_accepts_eddsa_rejects_hs256() {
         let v = HandshakeVerifier::new(None, Some(ED25519_PUB_PEM)).expect("ed verifier");
-        let ed = sign_ed25519(&fresh_claims(), ED25519_PRIV_PEM);
-        assert_eq!(v.validate(&ed).unwrap(), fresh_claims());
+        let claims = fresh_claims();
+        let ed = sign_ed25519(&claims, ED25519_PRIV_PEM);
+        assert_eq!(v.validate(&ed).unwrap(), claims);
         let hs = sign(&fresh_claims(), KEY);
         assert!(matches!(v.validate(&hs), Err(AuthError::Invalid(_))));
     }
@@ -432,14 +431,13 @@ mod tests {
     #[test]
     fn both_verifier_dispatches_on_token_alg() {
         let v = HandshakeVerifier::new(Some(KEY), Some(ED25519_PUB_PEM)).expect("both");
+        let hs_claims = fresh_claims();
+        assert_eq!(v.validate(&sign(&hs_claims, KEY)).unwrap(), hs_claims);
+        let ed_claims = fresh_claims();
         assert_eq!(
-            v.validate(&sign(&fresh_claims(), KEY)).unwrap(),
-            fresh_claims()
-        );
-        assert_eq!(
-            v.validate(&sign_ed25519(&fresh_claims(), ED25519_PRIV_PEM))
+            v.validate(&sign_ed25519(&ed_claims, ED25519_PRIV_PEM))
                 .unwrap(),
-            fresh_claims()
+            ed_claims
         );
     }
 
@@ -499,6 +497,9 @@ mod tests {
         .unwrap()
     }
 
+    // Returns one snapshot per call. Capture it once and reuse it for both
+    // signing and comparison: two calls can observe different wall-clock
+    // seconds and produce claims whose iat/exp values differ by one second.
     fn fresh_claims() -> Claims {
         let n = now();
         Claims {

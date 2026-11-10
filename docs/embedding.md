@@ -31,14 +31,84 @@ The push token is a shared secret configured via
 `WSS_MUX_PUSH_AUTH_TOKEN`. Rotate by changing the env var and
 restarting.
 
+### Producer identity
+
+Each external push also has an opaque producer identity for fairness
+features. Supply it with `X-Producer-Id` on both single and batch pushes:
+
+```http
+X-Producer-Id: billing-api
+```
+
+The header does not authenticate or authorize a request; the shared bearer
+token remains the injection boundary. It is intended for an
+operator-controlled producer fleet, where producers that hold that token are
+trusted not to impersonate one another. Do not use it for audit identity or
+access control.
+
+The value must be 1–128 printable ASCII characters with no whitespace.
+An omitted header resolves to the shared identity `shared`, so existing
+producers keep their current behavior and share one fairness budget when a
+future fairness feature is enabled. For authenticated requests, invalid values
+return `400 Bad Request` unless an enabled overload limiter rejects the
+request first. Header validation runs after bearer authentication, so a
+request with missing or invalid credentials returns `401 Unauthorized`
+regardless of the header.
+Internal peer relays are not external producer pushes and have no producer
+identity.
+
 For batch efficiency:
 
 ```http
 POST /events/batch
 Authorization: Bearer <push-token>
+X-Producer-Id: billing-api
 
 { "events": [ {...}, {...}, ... ] }
 ```
+
+### Reserved per-producer push settings
+
+This release accepts the following startup settings to establish the
+configuration contract for a future per-producer push limiter. It does not
+currently enforce a per-producer budget: setting these variables does not
+change request handling, produce `429` responses, or add limiter metrics.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_RATE` | `0` | unsigned rate value reserved for future enforcement; a nonzero value causes the burst setting to be parsed |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | unsigned burst value reserved for future enforcement; must be greater than zero when the rate is nonzero |
+
+When `WSS_MUX_PUSH_RATE=0`, the burst setting is ignored. When the rate is
+nonzero and no burst is supplied, the parser defaults the burst to twice the
+rate, saturating at `4,294,967,295`. A supplied rate or active burst that is
+not an unsigned 32-bit integer fails startup; an active burst of zero also
+fails startup.
+
+### Opt-in producer overload signal
+
+By default every authenticated HTTP producer request is accepted for
+validation and immediate, non-blocking dispatch. To make a pod signal
+that it has exhausted a configured ingress budget, set
+`WSS_MUX_PUSH_OVERLOAD_RATE` above zero:
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_OVERLOAD_RATE` | `0` | shared refill rate for authenticated `/events` and `/events/batch` requests per process; `0` disables the feature entirely |
+| `WSS_MUX_PUSH_OVERLOAD_BURST` | `2 × RATE` | shared token-bucket capacity; must be greater than zero when the feature is enabled |
+
+The bucket is process-wide rather than per producer identity: it is a
+pod-capacity signal, not a producer quota. A request arriving after the
+bucket empties receives `503 Service Unavailable`, `Retry-After` as a
+whole number of seconds until one token refills, and `Connection:
+close`. It is not envelope-validated, dispatched, or relayed. Producer
+clients should wait at least the advertised duration and retry through
+their normal load-balancer path.
+
+Only an authenticated producer request spends a token. The internal
+peer-relay receipt endpoint is excluded so one-hop delivery remains
+best-effort and never recursively adds producer backpressure. Metric:
+`wss_mux_push_overload_rejected_total`.
 
 Responses:
 
@@ -48,6 +118,8 @@ Responses:
 - `413 Payload Too Large` if any event exceeds its stream's
   `max_payload_bytes` cap. In a batch this rejects the whole batch
   (all-or-nothing); nothing is dispatched.
+- `503 Service Unavailable` with `Retry-After` and `Connection: close`
+  when the opt-in producer overload bucket is empty.
 
 ### Custom envelope shape
 
@@ -190,13 +262,32 @@ WSS_MUX_OIDC_JWKS_REFRESH=300                  # seconds, default
   work: tokens still carry the public `iss` (and `wss-mux` validates
   against that), but discovery — and the `jwks_uri` it returns —
   resolves to an in-cluster address that never leaves the cluster.
-- **Resilience.** The JWKS is fetched at startup and refreshed every
-  `WSS_MUX_OIDC_JWKS_REFRESH` seconds; a failed refresh is logged +
-  metered (`wss_mux_oidc_jwks_refresh`) and keeps the last-good cache,
-  so an IdP blip does not 401 every client. Until the *first*
-  successful fetch, `/ready` returns 503 (`wss_mux_oidc_jwks_keys`
-  gauge stays 0) so the pod is kept out of rotation rather than
-  rejecting everyone.
+- **Rotation and resilience.** The full JWKS is fetched at startup, then
+  after each fetch attempt the process waits
+  `WSS_MUX_OIDC_JWKS_REFRESH` seconds before trying again. A successful
+  response atomically replaces the cache; a failed response retains the
+  last-good cache without a TTL. Until the *first* successful fetch,
+  `/ready` returns 503 (`wss_mux_oidc_jwks_keys` gauge stays 0) so the pod
+  is kept out of rotation rather than rejecting everyone. The precise
+  auth-frame contract, including multi-key validation and key-removal
+  behavior, is in `docs/protocol.md`.
+
+#### Rotating an OIDC signing key
+
+1. Publish the new JWK alongside the old JWK, with a distinct `kid` for
+   each key.
+2. Confirm every `wss-mux` instance has refreshed successfully before
+   issuing tokens signed by the new key. Use
+   `wss_mux_oidc_jwks_refresh{result="ok"}` and
+   `wss_mux_oidc_jwks_keys` to observe refreshes and cached key counts.
+3. After the old tokens can no longer be presented for a new `auth` frame,
+   remove the old JWK. The first successful refresh that omits it rejects
+   that `kid` for future auth on that instance.
+
+The refresh interval is not a maximum retirement deadline: failed fetches
+keep the last-good key set indefinitely, and instances refresh separately.
+Key removal also does not disconnect clients already authenticated with an
+old key; `wss-mux` validates a token only when it receives `auth`.
 
 `wss-mux` never contacts the IdP per request — only the periodic JWKS
 poll — and adds no new dependency to do it.

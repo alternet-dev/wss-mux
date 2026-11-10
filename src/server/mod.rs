@@ -8,6 +8,7 @@ use self::metrics::Metrics;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -22,7 +23,7 @@ use crate::config::Config;
 use crate::connection::{ConnId, OutboundTx};
 use crate::manifest::{Manifest, ManifestError};
 use crate::peers::PeerUrl;
-use crate::ratelimit::PerSourceRateLimiter;
+use crate::ratelimit::{PerSourceRateLimiter, PushOverloadLimiter};
 use crate::registry::Registry;
 use crate::server::relay::RelayBatch;
 
@@ -80,6 +81,9 @@ struct Inner {
     // publish limiting (byte-identical pre-feature behaviour). The
     // idle-eviction sweep is spawned at startup when this is `Some`.
     ws_publish_limiter: Option<Arc<PerSourceRateLimiter>>,
+    // One process-wide bucket for opt-in HTTP producer overload signaling.
+    // `None` when disabled, which leaves the pre-feature push path intact.
+    push_overload_limiter: Option<Arc<PushOverloadLimiter>>,
 }
 
 impl AppState {
@@ -119,6 +123,21 @@ impl AppState {
                 config.ws_publish_idle_ttl,
             ))
         });
+        let push_overload_limiter = (config.push_overload_rate_per_sec > 0).then(|| {
+            // `push_overload_burst == 0` means the caller did not set it.
+            // Apply the same "twice the rate" default that env parsing uses so
+            // that programmatic callers get a working bucket, not a
+            // zero-capacity one that rejects every request.
+            let burst = if config.push_overload_burst == 0 {
+                config.push_overload_rate_per_sec.saturating_mul(2)
+            } else {
+                config.push_overload_burst
+            };
+            Arc::new(PushOverloadLimiter::new(
+                burst,
+                config.push_overload_rate_per_sec,
+            ))
+        });
         Ok(Self {
             inner: Arc::new(Inner {
                 config,
@@ -136,6 +155,7 @@ impl AppState {
                 relay_tx,
                 relay_rx,
                 ws_publish_limiter,
+                push_overload_limiter,
             }),
         })
     }
@@ -160,6 +180,16 @@ impl AppState {
     /// idle-eviction task at startup.
     pub fn ws_publish_limiter(&self) -> Option<&Arc<PerSourceRateLimiter>> {
         self.inner.ws_publish_limiter.as_ref()
+    }
+
+    /// Consume one token from the process-wide HTTP producer overload bucket.
+    /// Returns `None` when the operator has not opted in (pushes are
+    /// unlimited). Returns `Some(Ok(()))` when the request is admitted and
+    /// `Some(Err(duration))` when the bucket is empty, where `duration` is
+    /// the whole-second `Retry-After` value to include in the 503 response.
+    fn check_push_overload(&self) -> Option<Result<(), Duration>> {
+        let limiter = self.inner.push_overload_limiter.as_ref()?;
+        Some(limiter.try_take(Instant::now()))
     }
 
     /// Current manifest snapshot. The returned `Arc` is independent of any
