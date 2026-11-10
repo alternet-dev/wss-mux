@@ -585,10 +585,14 @@ streams:
 Absent or `false` keeps unconditional broadcast. Do not enable this
 automatically: first measure a sustained high
 `wss_mux_relay_events_unwanted_total` / `wss_mux_relay_events_relayed_total`
-ratio on the stream topology. Interest additions take up to
-`WSS_MUX_PEER_DNS_REFRESH_SECS` to reach senders, so a newly subscribed
-peer can miss events during that window; interest removal can cause only
-temporary extra traffic. Missing interest data fails open to broadcast.
+ratio in the aggregate fleet workload, then use a representative load test,
+application knowledge, or external per-stream telemetry to choose a stream.
+The built-in counters are not labeled by stream. Interest changes become
+visible after a later refresh completes; the configured interval is a sleep
+after the prior cycle's discovery and peer-interest work, not a hard upper
+bound on that delay. A newly subscribed peer can miss events until then, and
+interest removal can cause only temporary extra peer relay traffic. Missing
+interest data fails open to broadcast.
 The complete selection and operations model is in
 [docs/operations.md](operations.md#selective-relay-opt-in).
 

@@ -222,12 +222,17 @@ occupancy is near zero outside fanout bursts.
   local subscriber) over `wss_mux_relay_events_relayed_total`. See
   `docs/operations.md`. A stream can opt into selective relay: peers
   expose bounded, aggregate stream/key interest snapshots, and senders
-  cache them for one discovery interval. These snapshots carry no
-  subscriber identity or count, fail open when unavailable, and are
-  never persisted. `wss_mux_relay_events_skipped_total` counts the
-  event-peer deliveries suppressed by a known non-matching snapshot;
-  `wss_mux_relay_interest_refresh_total{result}` reports whether peer
-  snapshots remain available.
+  retain them until a later refresh changes them. The refresh loop sleeps
+  for its configured interval only after discovery and peer-interest
+  requests finish, so that interval is a cadence rather than a hard
+  snapshot-age bound. These snapshots carry no subscriber identity or
+  count, fail open when unavailable, and are never persisted. The relay
+  counters are process-wide and unlabeled: the unwanted/relayed ratio
+  measures aggregate waste, not a specific stream.
+  `wss_mux_relay_events_skipped_total` counts aggregate event-peer
+  deliveries suppressed by a known non-matching snapshot;
+  `wss_mux_relay_interest_refresh_total{result}` cumulatively counts
+  per-peer refresh attempts by result, not current snapshot availability.
 - **Token issuance.** Only validation.
 - **Producer adapters.** No Kafka consumer, no Redis subscriber.
 - **TLS termination.** Client-edge TLS is done at the reverse proxy

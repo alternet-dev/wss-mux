@@ -220,8 +220,10 @@ reverse proxy's job — this is a separate axis.
 
 With the conventional `wss-mux-headless` Service, autoscaling works
 out of the box: a new pod becomes a DNS A record once Ready, every
-instance picks it up within `WSS_MUX_PEER_DNS_REFRESH_SECS`, and it
-both relays to and receives relays from the rest of the fleet.
+instance picks it up on a later refresh cycle, and it then both relays
+to and receives relays from the rest of the fleet. The configured
+interval is a cadence, not a wall-clock upper bound: the refresh loop
+sleeps only after discovery and peer-interest requests finish.
 
 ### Recommended target: active connections
 
@@ -300,10 +302,12 @@ size, stream fanout, and subscriber mix make a universal events-per-second
 value misleading.
 
 An HPA creates a pod before it can receive client traffic, but peer discovery
-still has its own delay: after the pod becomes Ready, existing pods can take
-up to `WSS_MUX_PEER_DNS_REFRESH_SECS` (three seconds by default) to discover
-it. Size the scale-up policy and connection headroom for that interval; the
-new pod's clients can miss relayed events until discovery converges.
+still has its own delay: a Ready pod is discovered only on a later refresh
+cycle. `WSS_MUX_PEER_DNS_REFRESH_SECS` (three seconds by default) is the
+sleep between completed cycles, not an upper bound on discovery time: each
+cycle also performs discovery and peer-interest requests. Size the scale-up
+policy and connection headroom for that delay; the new pod's clients can miss
+relayed events until discovery converges.
 
 > **If you rename the headless Service and set neither
 > `WSS_MUX_PEER_SERVICE` nor `WSS_MUX_PEER_DNS`, discovery resolves
@@ -322,27 +326,28 @@ Clients must reconnect (ideally with jittered backoff) and re-send
 their `auth` + `subscribe` frames. Plan for reconnect storms on rolling restarts;
 make sure your client library re-subscribes automatically.
 
-A terminating pod may linger in peers' sets for up to one refresh
-interval. Relays to it fail fast (connection refused / timeout within
+A terminating pod may linger in peers' sets until a later discovery refresh
+removes it. Relays to it fail fast (connection refused / timeout within
 `WSS_MUX_PEER_RELAY_TIMEOUT_MS`), are metered as
 `wss_mux_relay_failed_total`, and dropped. This is expected and
 harmless during scale-down — it does not affect the producer or
 delivery to live instances.
 
-### DNS-staleness window
+### DNS-staleness cadence
 
-Membership is *polled*, not pushed. Both blind spots are bounded by
-`WSS_MUX_PEER_DNS_REFRESH_SECS` (default 3s):
+Membership is *polled*, not pushed. Both blind spots last until a later
+discovery operation completes:
 
 - **Scale-up:** a new pod is invisible to peers until the next
-  refresh — its clients miss events published in that ≤3s window.
+  discovery refresh — its clients can miss relayed events until then.
 - **Scale-down:** a dead pod lingers in the set until the next
   refresh; relays to it fail and are absorbed best-effort.
 
-Lower the interval for a tighter window at the cost of more (cached,
-cheap) DNS queries; raise it to reduce queries at the cost of a wider
-window. Per-relay delivery failure is *not* polled — it is handled
-inline per request.
+`WSS_MUX_PEER_DNS_REFRESH_SECS` (default 3s) is the sleep between completed
+cycles. Lowering it reduces the idle part of the normal wait at the cost of
+more (cached, cheap) DNS queries; it does not impose a hard staleness bound,
+because discovery and peer-interest work also occur in a cycle. Per-relay
+delivery failure is *not* polled — it is handled inline per request.
 
 ### Relay coalescing (event-volume ceiling)
 
@@ -358,15 +363,17 @@ flush loop is panic-free by construction; if it ever stopped,
 flatlines — the operator-visible signal. Watch
 `wss_mux_relay_events_unwanted_total` ÷
 `wss_mux_relay_events_relayed_total`: a high ratio means most relayed
-events have no local subscriber (stream-sparse fleet) and selective
-relay would help.
+events in this instance's aggregate workload have no local subscriber
+and selective relay merits investigation. These unlabeled process-wide
+counters cannot identify which stream created the waste.
 
 ### Selective relay (opt-in)
 
 Unconditional broadcast is still the default and is the right choice
 for balanced streams: it has no coordination window and often has near
-zero waste. Enable selective relay only on a stream whose measured fleet
-topology shows sustained unwanted relay traffic:
+zero waste. Enable selective relay only when a representative load test,
+application knowledge, or external per-stream telemetry identifies a stream
+with sparse peer interest:
 
 ```yaml
 version: 1
@@ -378,8 +385,10 @@ streams:
 
 There is no automatic toggle. The operator chooses after observing
 `wss_mux_relay_events_unwanted_total` divided by
-`wss_mux_relay_events_relayed_total`; absent or `false` keeps the
-pre-feature broadcast path.
+`wss_mux_relay_events_relayed_total` to assess aggregate fleet waste, then
+uses per-stream workload information to choose a stream. The built-in ratio
+has no stream label, so it cannot make that choice on its own. Absent or
+`false` keeps the pre-feature broadcast path.
 
 For requested selective streams, every peer advertises aggregate local
 interest as either all keys or a set of exact keys. Advertisements carry
@@ -391,28 +400,35 @@ while allowing extra traffic instead of risking a missed wanted event.
 Senders refresh advertisements on `WSS_MUX_PEER_DNS_REFRESH_SECS`
 (default 3 seconds). DNS fleets combine membership and interest refresh;
 static `WSS_MUX_PEERS` fleets skip DNS but still refresh interest on the
-same cadence. Filtering happens per peer after relay coalescing, so one
-coalesced input batch can become different smaller batches for different
-peers.
+same cadence. The loop sleeps for that interval only after discovery and
+all peer-interest requests finish, so it is not a wall-clock upper bound on
+when a change becomes visible. Filtering happens per peer after relay
+coalescing, so one coalesced input batch can become different smaller batches
+for different peers.
 
 The freshness tradeoff is explicit:
 
-- A new subscription may take up to one refresh interval to appear in
-  peer interest and can miss events in that window.
-- An unsubscribe may leave stale interest for the same interval, causing
-  only extra relay traffic.
+- A new subscription can miss selective events until a later interest refresh
+  completes. Its delay includes the wait for the next cycle plus discovery and
+  peer-interest request time, so the configured interval is not a hard upper
+  bound.
+- An unsubscribe can leave stale interest until a later refresh completes,
+  causing extra peer relay traffic but no delivery to the removed
+  subscription.
 - A missing, invalid, unauthorized, or unreachable interest response is
   treated as unknown and fails open to unconditional relay. This keeps
   rolling upgrades and coordination failures delivery-safe.
 
 `wss_mux_relay_events_skipped_total` counts event-peer deliveries omitted
-by selective relay. Compare its growth with the unwanted-event ratio to
-confirm that the chosen streams benefit. A stream with frequent new
-subscriptions and strict first-event delivery should remain on
-unconditional broadcast even when its waste ratio is high.
-`wss_mux_relay_interest_refresh_total{result="error"}` counts peers whose
-latest advertisement could not be used and therefore fell back to
-broadcast.
+by selective relay across all streams. Compare its aggregate growth with the
+unwanted-event ratio to confirm that the configuration benefits the fleet; it
+does not attribute skipped deliveries to a stream. A stream with frequent new
+subscriptions and strict first-event delivery should remain on unconditional
+broadcast even when its workload contributes to high aggregate waste.
+`wss_mux_relay_interest_refresh_total{result="error"}` cumulatively counts
+failed per-peer refresh attempts. A failed attempt clears that peer's cached
+snapshot and fails open to broadcast until a later success; a later success
+does not reduce the counter.
 
 ## Non-Kubernetes / fixed fleet
 
@@ -459,8 +475,8 @@ Scrape `GET /metrics` (Prometheus/OpenMetrics). Peer-relay signals:
 | `wss_mux_peers_known` (gauge) | ≈ replicas − 1 on every pod | `0` (or far below N−1) in a multi-instance deploy |
 | `wss_mux_relay_sent_total` | rising with producer traffic | flat while events flow and peers exist |
 | `wss_mux_relay_failed_total{reason}` | ~0 steady state; brief blips on scale-down | sustained/climbing outside a scale event |
-| `wss_mux_relay_events_skipped_total` | rises only for intentionally selective streams | flat despite high unwanted-event ratio, or rising on a stream that should broadcast |
-| `wss_mux_relay_interest_refresh_total{result="error"}` | ~0 steady state; brief blips during mixed-version rollout | sustained/climbing means selective relay is failing open to broadcast |
+| `wss_mux_relay_events_skipped_total` | rises after intentionally selective streams omit peer deliveries | nonzero when no stream is selective, or flat despite high aggregate unwanted-event ratio |
+| `wss_mux_relay_interest_refresh_total{result="error"}` | stable; ideally 0 since process start | a sustained nonzero error rate; the cumulative total does not report current snapshot availability |
 | `wss_mux_events_rejected_total{reason="payload_too_large"}` | 0 | rising — producers exceeding a stream's `max_payload_bytes` |
 | `wss_mux_push_overload_rejected_total` | 0 unless the opt-in producer budget is intentionally shedding | rising — producer requests are receiving `503`; lower ingress, add replicas, or raise the configured budget |
 
@@ -480,8 +496,8 @@ skew); `timeout` means peers are overloaded or
 | `…{reason="status"}` sustained | `WSS_MUX_PUSH_AUTH_TOKEN` differs across pods | Use one shared secret fleet-wide |
 | `…{reason="timeout"}` sustained | Peers overloaded; or timeout too tight | Scale out; raise `WSS_MUX_PEER_RELAY_TIMEOUT_MS` |
 | All relays fail right after enabling TLS | Bad CA / client cert path or PEM | Check `WSS_MUX_PEER_CA_FILE` / `_CLIENT_CERT` / `_KEY`; startup also logs this |
-| Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; bounded by the refresh interval |
-| Selective stream still broadcasts to every peer | Interest endpoint unavailable/invalid, or peer running an older version; filtering fails open | Check peer reachability and shared push-token consistency; allow one refresh interval after rollout |
+| Brief relay-failure spike during a rollout | Terminating pods still in the peer set | Expected; resolves after a later discovery refresh removes the pod |
+| Selective stream still broadcasts to every peer | Interest endpoint unavailable/invalid, or peer running an older version; filtering fails open | Check peer reachability and shared push-token consistency; wait for a successful completed refresh after rollout |
 | Newly subscribed peer misses the first selective events | Interest advertisement has not refreshed yet | Keep this stream on unconditional broadcast if the first-event window is unacceptable; otherwise lower `WSS_MUX_PEER_DNS_REFRESH_SECS` |
 | Producer sees latency or timeouts | **Not** peer-relay — it is fire-and-forget and never blocks the producer | Look at the producer path, manifest load (`/ready`), or the client side |
 | `413` from `POST /events` | Payload exceeds the stream's `max_payload_bytes` | Raise the cap in the manifest or shrink the payload |

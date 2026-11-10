@@ -397,10 +397,13 @@ event. Missing, invalid, unauthorized, or unreachable interest responses
 are also treated as unknown and fail open to unconditional relay. This
 makes rolling upgrades and temporary coordination failures delivery-safe.
 
-Interest is refreshed on `WSS_MUX_PEER_DNS_REFRESH_SECS`. A new
-subscription can therefore take up to one refresh interval to become
-visible to senders; a removed subscription can receive unnecessary
-relays for the same interval. This bounded staleness is part of the
+Interest is refreshed on `WSS_MUX_PEER_DNS_REFRESH_SECS`. The refresh loop
+sleeps for that interval only after discovery and all peer-interest requests
+finish, so it is a cadence rather than a wall-clock upper bound. A new
+subscription can miss selective events until a later refresh completes. A
+removed subscription can leave stale interest and cause unnecessary relay
+traffic to its peer, but that peer has already removed the subscription, so no
+event is delivered to the removed subscription. This staleness is part of the
 best-effort, at-most-once peer-relay contract.
 
 ## Forward compatibility
