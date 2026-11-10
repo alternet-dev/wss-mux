@@ -103,6 +103,11 @@ curl -X POST http://localhost:8080/events \
   -d '{"stream":"chat_messages","key":"room-42","payload":{"text":"hi"}}'
 ```
 
+Producers in an operator-controlled fleet may add `X-Producer-Id` as an
+opaque fairness key; producers that omit it share the default identity. See
+[embedding](docs/embedding.md#producer-identity) for its trust boundary and
+validation rules.
+
 Subscribe (client) — using the TypeScript SDK
 ([`@alternet/wss-mux-client`](clients/typescript/)):
 
@@ -154,6 +159,10 @@ All configuration is environment variables, read once at startup.
 | `WSS_MUX_ENVELOPE_PAYLOAD_PATH` | `payload` | dotted path to the payload |
 | `WSS_MUX_INBOUND_RATE` | `50` | inbound client-frame rate (frames/sec/conn); `0` disables |
 | `WSS_MUX_INBOUND_BURST` | `100` | inbound token-bucket capacity (burst) |
+| `WSS_MUX_PUSH_RATE` | `0` | reserved per-producer push-rate setting; parsed at startup but not enforced yet |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | reserved burst setting; parsed when `WSS_MUX_PUSH_RATE` is nonzero but not enforced yet |
+| `WSS_MUX_PUSH_OVERLOAD_RATE` | `0` | opt-in, process-wide HTTP producer request rate; exhausted requests receive `503` + `Retry-After` and are not dispatched |
+| `WSS_MUX_PUSH_OVERLOAD_BURST` | `2 × RATE` | producer overload token-bucket capacity; only meaningful when `WSS_MUX_PUSH_OVERLOAD_RATE` is nonzero |
 | `WSS_MUX_PEER_RELAY` | (on) | `off` disables cross-instance relay + discovery |
 | `WSS_MUX_PEER_SERVICE` | `wss-mux-headless` | headless Service name for the composed discovery FQDN |
 | `WSS_MUX_PEER_NAMESPACE` | (auto) | namespace override; else auto-read from the ServiceAccount |
@@ -186,6 +195,14 @@ Operational notes:
   subprotocol for CBOR instead of JSON; frame shapes are identical.
 - **`GET /metrics`** exposes Prometheus/OpenMetrics counters;
   `/health` and `/ready` are the liveness/readiness probes.
+- **Producer overload signal.** Set `WSS_MUX_PUSH_OVERLOAD_RATE` to
+  opt in to a per-pod HTTP producer budget. A saturated pod responds
+  `503 Service Unavailable` with `Retry-After` in whole seconds and
+  `Connection: close`; the rejected request is never dispatched.
+- **Reserved producer fairness settings.** `WSS_MUX_PUSH_RATE` and
+  `WSS_MUX_PUSH_BURST` establish the startup configuration contract for
+  future per-producer limiting. This release does not enforce them or
+  return `429` responses.
 - **Token validation.** Signed-handshake tokens (HS256 and/or
   Ed25519/EdDSA — the token's `alg` picks the key) *or*, mutually
   exclusively, OIDC: the `auth` token is validated against an OIDC
@@ -213,6 +230,7 @@ covered end-to-end in [docs/operations.md](docs/operations.md).
 3. [docs/embedding.md](docs/embedding.md) — how to integrate
 4. [docs/architecture.md](docs/architecture.md) — implementation shape
 5. [docs/operations.md](docs/operations.md) — running it (incl. multi-instance)
+6. [docs/deployment-patterns.md](docs/deployment-patterns.md) — choosing a fleet topology
 
 LLM agents: start with [AGENTS.md](AGENTS.md).
 
