@@ -241,3 +241,37 @@ fn spawn_sighup_reloader(state: AppState) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use wss_mux::config::PeerConfig;
+    use wss_mux::peers::{PeerUrl, Scheme};
+
+    #[test]
+    fn static_peer_fleet_keeps_refresher_active() {
+        let interval = Duration::from_secs(7);
+        let peer_cfg = PeerConfig {
+            static_peers: vec![PeerUrl {
+                scheme: Scheme::Http,
+                host: "peer.example".into(),
+                port: 8080,
+            }],
+            dns_refresh: interval,
+            ..PeerConfig::default()
+        };
+
+        assert_eq!(peer_refresh_interval(&peer_cfg), Some(interval));
+    }
+
+    #[test]
+    fn disabled_relay_has_no_refresher_interval() {
+        let peer_cfg = PeerConfig {
+            relay_enabled: false,
+            ..PeerConfig::default()
+        };
+
+        assert_eq!(peer_refresh_interval(&peer_cfg), None);
+    }
+}
