@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
-use wss_mux::config::Config;
+use wss_mux::config::{Config, PeerConfig};
 use wss_mux::manifest::Manifest;
 use wss_mux::server::metrics::{ReloadResult, ReloadResultLabel};
 use wss_mux::server::{build_app, AppState};
@@ -111,12 +111,16 @@ async fn try_serve() -> anyhow::Result<()> {
 /// `WSS_MUX_PEERS` skip DNS but remain on the loop so selective-relay
 /// interest stays fresh. Relay disabled (`WSS_MUX_PEER_RELAY=off`) ⇒
 /// task not spawned, no DNS query or interest request.
+fn peer_refresh_interval(peer_cfg: &PeerConfig) -> Option<std::time::Duration> {
+    peer_cfg.relay_enabled.then_some(peer_cfg.dns_refresh)
+}
+
 fn spawn_peer_refresher(state: AppState) {
     let peer_cfg = state.config().peers.clone();
-    if !peer_cfg.relay_enabled {
+    let Some(refresh_interval) = peer_refresh_interval(&peer_cfg) else {
         tracing::info!("peer relay disabled (WSS_MUX_PEER_RELAY=off)");
         return;
-    }
+    };
     let self_port = state.config().listen_addr.port();
     tokio::spawn(async move {
         loop {
@@ -125,7 +129,7 @@ fn spawn_peer_refresher(state: AppState) {
             state.set_peers(peers);
             wss_mux::server::relay::refresh_peer_interests(&state).await;
             tracing::debug!(peers = count, "peer set refreshed");
-            tokio::time::sleep(peer_cfg.dns_refresh).await;
+            tokio::time::sleep(refresh_interval).await;
         }
     });
 }
@@ -250,7 +254,7 @@ mod tests {
     use wss_mux::peers::{PeerUrl, Scheme};
 
     #[test]
-    fn static_peer_fleet_keeps_refresher_active() {
+    fn static_peer_fleet_keeps_peer_refresher_active() {
         let interval = Duration::from_secs(7);
         let peer_cfg = PeerConfig {
             static_peers: vec![PeerUrl {
@@ -266,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_relay_has_no_refresher_interval() {
+    fn disabled_relay_has_no_peer_refresher_interval() {
         let peer_cfg = PeerConfig {
             relay_enabled: false,
             ..PeerConfig::default()
