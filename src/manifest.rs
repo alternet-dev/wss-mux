@@ -73,9 +73,6 @@ pub enum ManifestError {
 }
 
 impl Manifest {
-    /// Schema version accepted by this binary.
-    pub const SCHEMA_VERSION: u32 = 1;
-
     pub fn load(path: &Path) -> Result<Self, ManifestError> {
         let content = std::fs::read_to_string(path).map_err(|source| ManifestError::Read {
             path: path.to_path_buf(),
@@ -95,7 +92,7 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.version != Self::SCHEMA_VERSION {
+        if self.version != 1 {
             return Err(ManifestError::UnsupportedVersion(self.version));
         }
         let mut seen = HashSet::new();
@@ -461,13 +458,6 @@ streams:
             matches!(err, ManifestError::Parse { .. }),
             "negative max_payload_bytes must be rejected at parse, got {err:?}"
         );
-    }
-
-    #[test]
-    fn schema_version_constant_is_one() {
-        // SCHEMA_VERSION must equal the version accepted by validate() so
-        // callers can compare without hard-coding the magic number 1.
-        assert_eq!(Manifest::SCHEMA_VERSION, 1);
     }
 
     #[test]
