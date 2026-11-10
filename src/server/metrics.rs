@@ -137,6 +137,9 @@ pub struct Metrics {
     /// WS publish frames rejected by the per-source rate limit. No
     /// source label — cardinality risk.
     pub ws_publish_rate_limited: Counter,
+    /// Authenticated HTTP producer pushes rejected by the opt-in overload
+    /// limiter. No producer label — cardinality risk.
+    pub push_overload_rejected: Counter,
     pub relay_sent: Counter,
     /// Relayed (peer-origin) events that matched no local subscription
     /// — the cross-instance-waste / stream-sparsity signal that gates
@@ -174,6 +177,7 @@ impl Default for Metrics {
         let subscriptions_revoked = Family::<RevokeReasonLabel, Counter>::default();
         let frames_rate_limited = Counter::default();
         let ws_publish_rate_limited = Counter::default();
+        let push_overload_rejected = Counter::default();
         let relay_sent = Counter::default();
         let relay_events_unwanted = Counter::default();
         let relay_flushes = Counter::default();
@@ -235,6 +239,11 @@ impl Default for Metrics {
             "wss_mux_ws_publish_rate_limited",
             "WS publish frames rejected by the per-source publish rate limit",
             ws_publish_rate_limited.clone(),
+        );
+        registry.register(
+            "wss_mux_push_overload_rejected",
+            "HTTP producer pushes rejected by the opt-in overload limiter",
+            push_overload_rejected.clone(),
         );
         registry.register(
             "wss_mux_relay_sent",
@@ -304,6 +313,7 @@ impl Default for Metrics {
             subscriptions_revoked,
             frames_rate_limited,
             ws_publish_rate_limited,
+            push_overload_rejected,
             relay_sent,
             relay_events_unwanted,
             relay_flushes,

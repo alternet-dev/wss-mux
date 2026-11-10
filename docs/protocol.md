@@ -15,16 +15,50 @@ type until auth succeeds.
 { "type": "auth", "token": "<signed-token>" }
 ```
 
-The server validates the signature and TTL of the token. The token is
-a JWT signed with **HS256** or **Ed25519 (EdDSA)**; the accepted
-algorithm is pinned to the server's configured key (the token's `alg`
-only selects which configured key, never widening what is accepted).
-See `docs/embedding.md` for key configuration.
+The server validates the token signature and time claims. With the
+signed-handshake configuration, the token is a JWT signed with **HS256**
+or **Ed25519 (EdDSA)**; the accepted algorithm is pinned to the server's
+configured key (the token's `alg` only selects which configured key, never
+widening what is accepted). With OIDC configuration, the token must carry
+a `kid` that selects a current JWK. See `docs/embedding.md` for key
+configuration.
 
 - **Success**: connection enters the authenticated state. No ack frame
   is sent — the absence of a `close` is the ack.
 - **Failure**: connection is closed with WebSocket close code `4401`
   ("unauthenticated").
+
+### OIDC JWKS rotation
+
+When OIDC validation is configured, the `auth` frame is validated against
+the process's current cached JWKS. The cache has the following contract:
+
+- **Refresh timing.** A fetch starts when the process starts. After every
+  fetch attempt, whether it succeeded or failed, the process waits
+  `WSS_MUX_OIDC_JWKS_REFRESH` seconds before the next attempt (300 seconds
+  by default). The interval is therefore a delay after an attempt, not a
+  cache-expiry deadline. Each instance refreshes independently.
+- **Atomic replacement, no added grace.** A successful fetch atomically
+  replaces the entire cached set; keys are not merged across responses.
+  There is no separate grace-period setting. A token signed by a retired
+  key remains eligible only until the next *successful* refresh on that
+  instance publishes a set without that key, after which new `auth` frames
+  using that `kid` fail even if the token has not expired.
+- **Multiple active keys.** Every usable JWK in the current set is active.
+  A token is accepted when its `kid` selects a current JWK and it satisfies
+  the normal signature, algorithm, issuer, audience, and time-claim checks.
+  This permits an issuer to publish old and new keys together during a
+  rotation. Issuers must use a distinct `kid` for each active key.
+- **Fetch failures.** A failed fetch does not clear or age out a
+  previously successful cache; its keys remain usable indefinitely, subject
+  to the token's own claim validation, until another fetch succeeds or the
+  process restarts. If no fetch has ever succeeded, the cache is empty and
+  `/ready` returns `503`.
+- **Established connections.** JWKS changes affect future `auth` frames
+  only. A connection authenticated before a refresh is not revalidated or
+  disconnected when keys change.
+
+See `docs/embedding.md` for the rotation procedure and configuration.
 
 ### `subscribe` (client → server)
 
@@ -197,6 +231,33 @@ global `WSS_MUX_QUEUE_DEPTH=0` makes the per-connection buffer
 unbounded — no `overflow` is ever emitted, at the cost of the
 per-connection memory bound (a stalled client can OOM the instance).
 See `docs/embedding.md`.
+
+## HTTP producer overload response
+
+`POST /events` and `POST /events/batch` normally return `204 No
+Content` after accepting an authenticated producer request. The
+process-wide producer overload limiter is disabled by default. When an
+operator enables it and its token bucket is empty, either endpoint
+returns:
+
+```http
+503 Service Unavailable
+Retry-After: <whole seconds>
+Connection: close
+
+overloaded
+```
+
+The request is rejected before envelope validation and dispatch: no
+event from it reaches local subscribers or peer relay. `Retry-After`
+is the ceiling of the time until one request token refills. `Connection:
+close` asks HTTP/1.1 clients to release a keep-alive connection so a
+retry can select another pod. The limiter applies only after producer
+bearer authentication succeeds and does not apply to the internal
+one-hop peer relay receipt endpoint.
+
+This is an explicit operator opt-in. With the limiter disabled, no
+overload response, extra headers, or producer-side rate gate exists.
 
 ## Connection lifecycle
 
