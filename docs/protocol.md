@@ -341,6 +341,33 @@ lockstep model) rather than negotiated. Breaking wire changes between
 releases are documented in the CHANGELOG; clients pinned to a server
 release are paired with a server that speaks the same wire.
 
+## Manifest schema compatibility
+
+The stream manifest is a versioned configuration contract, separate
+from the WebSocket wire protocol. Its required top-level `version`
+field is the manifest **schema** version, not the `wss-mux` release
+version. A server accepts only schema versions it explicitly supports;
+for example, the current parser accepts only `version: 1` and rejects
+`version: 2` rather than guessing how to interpret it.
+
+At v1.0 and later, manifest changes follow these SemVer rules:
+
+- **Add an optional key** at the top level or inside a stream: minor
+  version, provided its default preserves the behavior of manifests
+  that omit it.
+- **Add a required key; remove, rename, or change a key's type,
+  meaning, default, or validation rules**: major version and a new
+  manifest schema version.
+
+Manifest decoding is strict: unknown keys at the top level and in
+stream entries are errors. The server does not ignore or merely warn
+about unknown keys, so a misspelling cannot silently change an access
+rule. Consequently, an older binary rejects a manifest that uses a
+key introduced by a newer minor release. Upgrade every server to the
+release that recognizes the key before deploying that manifest; use
+`wss-mux validate-manifest` from the target release as the deployment
+check.
+
 ## Forward compatibility
 
 Until v1.0, the protocol may break between minor versions. The
