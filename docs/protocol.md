@@ -361,7 +361,10 @@ one-hop relay receipt path are unchanged.
 When at least one local stream is selective, an instance periodically
 asks each discovered peer for its aggregate interest with
 `POST /internal/interest`. The request and response are CBOR and use the
-same bearer token as `POST /internal/relay`.
+dedicated `WSS_MUX_PEER_INTEREST_AUTH_TOKEN` bearer, not the producer or
+relay-injection `WSS_MUX_PUSH_AUTH_TOKEN`. The dedicated secret prevents a
+producer from enumerating subscriber keys. If it is unset, the endpoint does
+not advertise interest and selective relay fails open to broadcast.
 
 Request:
 
@@ -384,18 +387,21 @@ Response:
 }
 ```
 
-An omitted stream has no local subscribers. `all_keys: true` means a
-keyless subscription admits every event on the stream. Otherwise an
-event is wanted only when its key appears in `keys`; a keyless event is
-not wanted by key-specific subscriptions. Advertisements contain no
-connection IDs, subscriber identities, or subscription counts.
+For a stream included in the request, an omitted entry has no local
+subscribers. A sender treats a stream outside its most recent request as
+unknown and relays to that peer. `all_keys: true` means a keyless
+subscription admits every event on the stream. Otherwise an event is wanted
+only when its key appears in `keys`; a keyless event is not wanted by
+key-specific subscriptions. Advertisements contain no connection IDs,
+subscriber identities, or subscription counts.
 
 The key set is bounded at 4,096 distinct keys per stream. If a stream
 exceeds the bound, its advertisement uses `all_keys: true`, deliberately
 allowing extra relay traffic instead of dropping a potentially wanted
-event. Missing, invalid, unauthorized, or unreachable interest responses
-are also treated as unknown and fail open to unconditional relay. This
-makes rolling upgrades and temporary coordination failures delivery-safe.
+event. A sender accepts at most 1 MiB of an interest response before CBOR
+decoding. Missing, oversized, invalid, unauthorized, or unreachable interest
+responses are also treated as unknown and fail open to unconditional relay.
+This makes rolling upgrades and temporary coordination failures delivery-safe.
 
 Interest is refreshed on `WSS_MUX_PEER_DNS_REFRESH_SECS`. The refresh loop
 sleeps for that interval only after discovery and all peer-interest requests

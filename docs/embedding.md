@@ -593,6 +593,9 @@ after the prior cycle's discovery and peer-interest work, not a hard upper
 bound on that delay. A newly subscribed peer can miss events until then, and
 interest removal can cause only temporary extra peer relay traffic. Missing
 interest data fails open to broadcast.
+Selective filtering requires a fleet-shared
+`WSS_MUX_PEER_INTEREST_AUTH_TOKEN`, separate from the producer push token;
+without it, peers cannot read advertisements and continue broadcasting.
 The complete selection and operations model is in
 [docs/operations.md](operations.md#selective-relay-opt-in).
 

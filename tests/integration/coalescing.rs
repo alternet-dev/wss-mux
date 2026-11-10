@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use wss_mux::manifest::Manifest;
@@ -39,6 +39,34 @@ async fn fake_peer() -> (SocketAddr, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let addr = l.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(l, app).await.unwrap() });
     (addr, posts, events)
+}
+
+/// Delays the first chunk so concurrent chunk requests would let the
+/// second request arrive first. A sequential sender must retain input order.
+async fn ordered_peer() -> (SocketAddr, Arc<Mutex<Vec<u64>>>) {
+    let received = Arc::new(Mutex::new(Vec::new()));
+    let observed = received.clone();
+    let app = axum::Router::new().route(
+        "/internal/relay",
+        axum::routing::post(move |body: axum::body::Bytes| {
+            let observed = observed.clone();
+            async move {
+                let batch: RelayBatch = ciborium::from_reader(body.as_ref()).expect("relay CBOR");
+                let number = batch.events[0].payload["n"].as_u64().expect("event number");
+                if number == 0 {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                observed.lock().expect("received lock").push(number);
+                axum::http::StatusCode::NO_CONTENT
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listen");
+    let addr = listener.local_addr().expect("address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+    (addr, received)
 }
 
 #[tokio::test]
@@ -141,8 +169,13 @@ streams:
                 keys: vec!["room-42".into()],
             }],
         }),
+        &["chat_messages".into()],
     );
-    state.set_peer_interest(&empty, Some(InterestSnapshot::default()));
+    state.set_peer_interest(
+        &empty,
+        Some(InterestSnapshot::default()),
+        &["chat_messages".into()],
+    );
     spawn_relay_flusher(state.clone());
 
     let addr = spawn_server(state).await;
@@ -163,4 +196,43 @@ streams:
     assert!(wanted_posts.load(Ordering::SeqCst) >= 1);
     assert_eq!(empty_events.load(Ordering::SeqCst), 0);
     assert_eq!(empty_posts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn coalesced_chunks_preserve_order_per_peer() {
+    let (peer_addr, received) = ordered_peer().await;
+    let mut cfg = test_config();
+    cfg.relay_coalesce_ms = 10;
+    cfg.relay_coalesce_max_events = 1;
+    let state = AppState::new(cfg);
+    state.set_manifest(sample_manifest());
+    state.set_peers(vec![peer(peer_addr)]);
+    spawn_relay_flusher(state.clone());
+
+    let addr = spawn_server(state).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr}/events/batch"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .json(&serde_json::json!({
+            "events": [
+                {"stream": "chat_messages", "payload": {"n": 0}},
+                {"stream": "chat_messages", "payload": {"n": 1}}
+            ]
+        }))
+        .send()
+        .await
+        .expect("batch push");
+    assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if received.lock().expect("received lock").len() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("both chunks relayed");
+    assert_eq!(*received.lock().expect("received lock"), vec![0, 1]);
 }

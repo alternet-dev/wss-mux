@@ -390,6 +390,17 @@ uses per-stream workload information to choose a stream. The built-in ratio
 has no stream label, so it cannot make that choice on its own. Absent or
 `false` keeps the pre-feature broadcast path.
 
+Set one fleet-shared `WSS_MUX_PEER_INTEREST_AUTH_TOKEN` before enabling
+selective filtering. It is intentionally distinct from
+`WSS_MUX_PUSH_AUTH_TOKEN`: the producer credential can inject events but
+cannot read subscriber-key advertisements. If the peer-interest token is
+unset or differs across peers, snapshots are unavailable and relay remains
+unconditional.
+
+```bash
+WSS_MUX_PEER_INTEREST_AUTH_TOKEN=<separate-fleet-secret>
+```
+
 For requested selective streams, every peer advertises aggregate local
 interest as either all keys or a set of exact keys. Advertisements carry
 no connection IDs, subscription IDs, subscriber identities, or counts.
@@ -441,8 +452,9 @@ WSS_MUX_PEERS=http://10.0.0.11:8080,http://10.0.0.12:8080
 
 Each instance lists the *others* (its own address, if included, is
 auto-excluded). The same `WSS_MUX_PUSH_AUTH_TOKEN` must be shared
-across the fleet. Static membership is never DNS-polled; when selective
-relay is enabled, aggregate interest is still refreshed on
+across the fleet. Selective filtering also requires a distinct,
+fleet-shared `WSS_MUX_PEER_INTEREST_AUTH_TOKEN`. Static membership is never
+DNS-polled; when selective relay is enabled, aggregate interest is still refreshed on
 `WSS_MUX_PEER_DNS_REFRESH_SECS`.
 
 ## Why peer-relay and not Redis

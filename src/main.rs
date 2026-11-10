@@ -106,11 +106,11 @@ async fn try_serve() -> anyhow::Result<()> {
 }
 
 /// Keep the peer set fresh. Membership is polled (not per-relay
-/// delivery): re-resolve discovery every `WSS_MUX_PEER_DNS_REFRESH_SECS`
-/// so scale-up/down propagates within a tight window. Static
-/// `WSS_MUX_PEERS` skip DNS but remain on the loop so selective-relay
-/// interest stays fresh. Relay disabled (`WSS_MUX_PEER_RELAY=off`) ⇒
-/// task not spawned, no DNS query or interest request.
+/// delivery): each cycle waits `WSS_MUX_PEER_DNS_REFRESH_SECS` after
+/// discovery and peer-interest work complete. Static `WSS_MUX_PEERS`
+/// skip DNS but remain on the loop so selective-relay interest stays
+/// fresh. Relay disabled (`WSS_MUX_PEER_RELAY=off`) ⇒ task not spawned,
+/// no DNS query or interest request.
 fn peer_refresh_interval(peer_cfg: &PeerConfig) -> Option<std::time::Duration> {
     peer_cfg.relay_enabled.then_some(peer_cfg.dns_refresh)
 }

@@ -15,6 +15,7 @@ use wss_mux::manifest::Manifest;
 use wss_mux::server::{build_app, AppState};
 
 pub const PUSH_TOKEN: &str = "test-push-token";
+pub const PEER_INTEREST_TOKEN: &str = "test-peer-interest-token";
 pub const SIGNING_KEY: &str = "test-signing-key";
 
 // Deterministic Ed25519 test keypair (PKCS8 / SPKI PEM), matching the
@@ -37,6 +38,7 @@ pub fn test_config() -> Config {
         },
         "test.yaml".into(),
     );
+    c.peer_interest_auth_token = Some(PEER_INTEREST_TOKEN.into());
     c.inbound_rate_per_sec = 0;
     c.inbound_burst = 0;
     c

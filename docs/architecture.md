@@ -227,6 +227,9 @@ occupancy is near zero outside fanout bursts.
   requests finish, so that interval is a cadence rather than a hard
   snapshot-age bound. These snapshots carry no subscriber identity or
   count, fail open when unavailable, and are never persisted. The relay
+  uses a dedicated peer-interest bearer, separate from the producer token,
+  so producers cannot read advertisements. A snapshot records its request
+  scope; streams outside that scope fail open rather than looking unwanted.
   counters are process-wide and unlabeled: the unwanted/relayed ratio
   measures aggregate waste, not a specific stream.
   `wss_mux_relay_events_skipped_total` counts aggregate event-peer

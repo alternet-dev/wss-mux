@@ -15,6 +15,10 @@ use crate::server::AppState;
 /// peer advertises `all_keys`, preserving delivery while bounding each
 /// cached snapshot.
 pub const MAX_INTEREST_KEYS_PER_STREAM: usize = 4096;
+/// Maximum peer-interest response retained before CBOR decoding. This
+/// bounds memory consumed by an untrusted discovered endpoint; oversized
+/// data simply leaves that peer on fail-open broadcast.
+pub const MAX_INTEREST_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Internal relay body: a batch of already-canonical envelopes,
 /// CBOR-encoded. Independent of the producer-facing `WSS_MUX_ENVELOPE_*`
@@ -124,10 +128,11 @@ impl InterestSnapshot {
     }
 }
 
-/// Fire-and-forget relay of a producer batch to every discovered peer.
-/// Best-effort and never awaited by the request path: backpressure or a
-/// degraded peer must never reach the producer. With no peers it is a
-/// no-op ⇒ byte-identical to a single instance.
+/// Fire-and-forget relay of a producer batch to discovered peers.
+/// Selective streams may omit peers with a known non-matching interest
+/// snapshot. Best-effort and never awaited by the request path:
+/// backpressure or a degraded peer must never reach the producer. With
+/// no peers it is a no-op ⇒ byte-identical to a single instance.
 pub fn spawn_relay(state: &AppState, batch: RelayBatch) {
     let peers = state.peers();
     if peers.is_empty() {
@@ -181,6 +186,10 @@ pub async fn refresh_peer_interests(state: &AppState) {
         state.clear_peer_interests();
         return;
     }
+    let Some(token) = state.config().peer_interest_auth_token.clone() else {
+        state.clear_peer_interests();
+        return;
+    };
     let request = InterestRequest {
         streams: streams.clone(),
     };
@@ -191,7 +200,6 @@ pub async fn refresh_peer_interests(state: &AppState) {
     }
 
     let client = state.relay_client().clone();
-    let token = state.config().push_auth_token.clone();
     let fetches = peers.iter().cloned().map(|peer| {
         let client = client.clone();
         let token = token.clone();
@@ -206,12 +214,16 @@ pub async fn refresh_peer_interests(state: &AppState) {
                 .send()
                 .await;
             let snapshot = match response {
-                Ok(response) if response.status().is_success() => match response.bytes().await {
-                    Ok(bytes) => ciborium::from_reader::<InterestSnapshot, _>(bytes.as_ref())
-                        .ok()
-                        .map(|snapshot| snapshot.sanitize(&streams)),
-                    Err(_) => None,
-                },
+                Ok(response) if response.status().is_success() => {
+                    match bounded_interest_body(response).await {
+                        Some(bytes) => {
+                            ciborium::from_reader::<InterestSnapshot, _>(bytes.as_slice())
+                                .ok()
+                                .map(|snapshot| snapshot.sanitize(&streams))
+                        }
+                        None => None,
+                    }
+                }
                 _ => None,
             };
             (peer, snapshot)
@@ -229,8 +241,33 @@ pub async fn refresh_peer_interests(state: &AppState) {
                 },
             })
             .inc();
-        state.set_peer_interest(&peer, snapshot);
+        state.set_peer_interest(&peer, snapshot, &streams);
     }
+}
+
+/// Read a successful interest response without letting a discovered peer
+/// force an unbounded allocation. `Content-Length` is only an early exit;
+/// the streamed byte count is the enforced limit.
+async fn bounded_interest_body(mut response: reqwest::Response) -> Option<Vec<u8>> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_INTEREST_RESPONSE_BYTES as u64)
+    {
+        return None;
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body
+            .len()
+            .checked_add(chunk.len())
+            .map_or(true, |length| length > MAX_INTEREST_RESPONSE_BYTES)
+        {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Some(body)
 }
 
 /// Spawn the relay flush task. No-op if coalescing is off (rx
@@ -279,7 +316,8 @@ async fn relay_flush_loop(state: &AppState, rx: &mut mpsc::Receiver<RelayBatch>)
 }
 
 /// POST `events` to every peer, chunked at `max_events` per request
-/// (the blast-radius bound), all peers concurrently.
+/// (the blast-radius bound). Peers run concurrently, while chunks for a
+/// given peer remain ordered.
 async fn flush_to_peers(state: &AppState, events: Vec<EventEnvelope>, max_events: usize) {
     let peers = state.peers();
     if peers.is_empty() || events.is_empty() {
@@ -296,12 +334,9 @@ async fn send_events_to_peers(
     events: &[EventEnvelope],
     max_events: usize,
 ) {
-    let client = state.relay_client().clone();
-    let token = state.config().push_auth_token.clone();
     let manifest = state.manifest();
     let mut sends = Vec::new();
     for peer in peers {
-        let interest = state.peer_interest(peer);
         let filtered: Vec<EventEnvelope> = events
             .iter()
             .filter_map(|event| {
@@ -310,9 +345,9 @@ async fn send_events_to_peers(
                     .and_then(|manifest| manifest.stream(&event.stream))
                     .is_some_and(|stream| stream.selective_relay);
                 if selective
-                    && interest
-                        .as_ref()
-                        .is_some_and(|snapshot| !snapshot.wants(event))
+                    && state
+                        .peer_interest_wants(peer, event)
+                        .is_some_and(|wanted| !wanted)
                 {
                     state.metrics().relay_events_skipped.inc();
                     None
@@ -322,41 +357,54 @@ async fn send_events_to_peers(
             })
             .collect();
 
-        for chunk in filtered.chunks(max_events.max(1)) {
-            let mut body = Vec::new();
-            if ciborium::into_writer(
-                &RelayBatch {
-                    events: chunk.to_vec(),
-                },
-                &mut body,
-            )
-            .is_err()
-            {
-                state
-                    .metrics()
-                    .relay_failed
-                    .get_or_create(&RelayFailureLabel {
-                        reason: RelayFailure::Other,
-                    })
-                    .inc();
-                continue;
-            }
-            let url = format!("{}/internal/relay", peer.base());
-            let client = client.clone();
-            let token = token.clone();
-            sends.push(async move {
-                client
-                    .post(&url)
-                    .bearer_auth(&token)
-                    .header(header::CONTENT_TYPE, "application/cbor")
-                    .body(body)
-                    .send()
-                    .await
-            });
-        }
+        let state = state.clone();
+        let peer = peer.clone();
+        sends.push(async move {
+            send_peer_chunks(&state, &peer, &filtered, max_events).await;
+        });
     }
 
-    for result in futures_util::future::join_all(sends).await {
+    futures_util::future::join_all(sends).await;
+}
+
+/// Send chunks to one peer in input order. Callers run one future per peer,
+/// which preserves cross-peer concurrency without allowing later chunks to
+/// overtake earlier chunks at the same receiver.
+async fn send_peer_chunks(
+    state: &AppState,
+    peer: &PeerUrl,
+    events: &[EventEnvelope],
+    max_events: usize,
+) {
+    let client = state.relay_client().clone();
+    let token = state.config().push_auth_token.clone();
+    for chunk in events.chunks(max_events.max(1)) {
+        let mut body = Vec::new();
+        if ciborium::into_writer(
+            &RelayBatch {
+                events: chunk.to_vec(),
+            },
+            &mut body,
+        )
+        .is_err()
+        {
+            state
+                .metrics()
+                .relay_failed
+                .get_or_create(&RelayFailureLabel {
+                    reason: RelayFailure::Other,
+                })
+                .inc();
+            continue;
+        }
+
+        let result = client
+            .post(format!("{}/internal/relay", peer.base()))
+            .bearer_auth(&token)
+            .header(header::CONTENT_TYPE, "application/cbor")
+            .body(body)
+            .send()
+            .await;
         match result {
             Ok(resp) if resp.status().is_success() => {
                 state.metrics().relay_sent.inc();
@@ -403,6 +451,7 @@ mod tests {
             },
             "p".into(),
         );
+        c.peer_interest_auth_token = Some("interest".into());
         c.queue_depth = 8;
         c.inbound_rate_per_sec = 0;
         c.inbound_burst = 0;
@@ -597,10 +646,57 @@ mod tests {
         );
         let peer = a_peer();
         state.set_peers(vec![peer.clone()]);
-        state.set_peer_interest(&peer, Some(InterestSnapshot::default()));
+        state.set_peer_interest(&peer, Some(InterestSnapshot::default()), &["s".into()]);
         assert!(state.peer_interest(&peer).is_some());
 
         refresh_peer_interests(&state).await;
+        assert!(state.peer_interest(&peer).is_none());
+        assert!(state
+            .metrics()
+            .encode()
+            .contains("wss_mux_relay_interest_refresh_total{result=\"error\"} 1"));
+    }
+
+    #[tokio::test]
+    async fn oversized_chunked_interest_response_fails_open() {
+        use axum::body::{Body, Bytes};
+        use axum::routing::post;
+        use axum::Router;
+        use std::convert::Infallible;
+
+        let chunks = vec![
+            Ok::<_, Infallible>(Bytes::from(vec![0; MAX_INTEREST_RESPONSE_BYTES / 2])),
+            Ok::<_, Infallible>(Bytes::from(vec![0; (MAX_INTEREST_RESPONSE_BYTES / 2) + 1])),
+        ];
+        let app = Router::new().route(
+            "/internal/interest",
+            post(move || {
+                let chunks = chunks.clone();
+                async move { Body::from_stream(futures_util::stream::iter(chunks)) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listen");
+        let peer = PeerUrl {
+            scheme: Scheme::Http,
+            host: "127.0.0.1".into(),
+            port: listener.local_addr().expect("address").port(),
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.expect("serve") });
+
+        let state = AppState::new(coalescing_config());
+        state.set_manifest(
+            crate::manifest::Manifest::from_str(
+                "version: 1\nstreams:\n  - stream: s\n    subscribe: [role:x]\n    selective_relay: true\n",
+                std::path::Path::new("test.yaml"),
+            )
+            .expect("manifest"),
+        );
+        state.set_peers(vec![peer.clone()]);
+
+        refresh_peer_interests(&state).await;
+
         assert!(state.peer_interest(&peer).is_none());
         assert!(state
             .metrics()

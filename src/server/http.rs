@@ -280,14 +280,18 @@ pub async fn relay_receive(
 }
 
 /// Advertise aggregate local subscription interest for the requested
-/// streams. The internal CBOR endpoint shares relay authentication and
-/// reveals no connection IDs, subscription IDs, identities, or counts.
+/// streams. This read surface has a dedicated peer credential because
+/// the producer token authorizes writes but must not enumerate keys.
 pub async fn relay_interest(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
-    authenticate(&headers, &state.config().push_auth_token)?;
+    let token = state.config().peer_interest_auth_token.as_deref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "peer interest authentication is not configured",
+    ))?;
+    authenticate(&headers, token)?;
     let request: InterestRequest = ciborium::from_reader(body.as_ref())
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR interest request"))?;
     let snapshot = InterestSnapshot::from_registry(state.registry(), &request.streams);
