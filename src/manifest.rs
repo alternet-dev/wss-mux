@@ -73,8 +73,8 @@ pub enum ManifestError {
 }
 
 impl Manifest {
-    /// Placeholder; set to the correct value in the next commit.
-    pub const SCHEMA_VERSION: u32 = 0;
+    /// Schema version accepted by this binary.
+    pub const SCHEMA_VERSION: u32 = 1;
 
     pub fn load(path: &Path) -> Result<Self, ManifestError> {
         let content = std::fs::read_to_string(path).map_err(|source| ManifestError::Read {
@@ -95,7 +95,7 @@ impl Manifest {
     }
 
     pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.version != 1 {
+        if self.version != Self::SCHEMA_VERSION {
             return Err(ManifestError::UnsupportedVersion(self.version));
         }
         let mut seen = HashSet::new();
@@ -463,13 +463,10 @@ streams:
         );
     }
 
-    // --- schema-version tracking (TDD red commit) ---
-
     #[test]
     fn schema_version_constant_is_one() {
-        // The constant must equal the version accepted by validate() so
+        // SCHEMA_VERSION must equal the version accepted by validate() so
         // callers can compare without hard-coding the magic number 1.
-        // Red: SCHEMA_VERSION is 0 until the following implementation commit.
         assert_eq!(Manifest::SCHEMA_VERSION, 1);
     }
 
