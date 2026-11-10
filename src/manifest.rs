@@ -73,6 +73,9 @@ pub enum ManifestError {
 }
 
 impl Manifest {
+    /// Placeholder; set to the correct value in the next commit.
+    pub const SCHEMA_VERSION: u32 = 0;
+
     pub fn load(path: &Path) -> Result<Self, ManifestError> {
         let content = std::fs::read_to_string(path).map_err(|source| ManifestError::Read {
             path: path.to_path_buf(),
@@ -457,6 +460,29 @@ streams:
         assert!(
             matches!(err, ManifestError::Parse { .. }),
             "negative max_payload_bytes must be rejected at parse, got {err:?}"
+        );
+    }
+
+    // --- schema-version tracking (TDD red commit) ---
+
+    #[test]
+    fn schema_version_constant_is_one() {
+        // The constant must equal the version accepted by validate() so
+        // callers can compare without hard-coding the magic number 1.
+        // Red: SCHEMA_VERSION is 0 until the following implementation commit.
+        assert_eq!(Manifest::SCHEMA_VERSION, 1);
+    }
+
+    #[test]
+    fn unsupported_version_error_names_accepted_version() {
+        // Reject version 2 and name the accepted version in the message so
+        // operators know what to target.
+        let s = "version: 2\nstreams: []\n";
+        let err = Manifest::from_str(s, p()).expect_err("error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("version 1"),
+            "error should name accepted schema version; got: {msg}"
         );
     }
 
