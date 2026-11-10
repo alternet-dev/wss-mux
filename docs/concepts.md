@@ -118,8 +118,8 @@ user identities, sessions, or policy.
 
 A stateless dispatcher that accepts events on one end and authenticated
 multiplexed WebSocket subscribers on the other, routing events to
-subscribers without persistence, replay, or coordination with peer
-instances.
+subscribers without persistence, replay, or durable coordination with
+peer instances.
 
 That sentence is the whole project. Every feature should follow from
 it; anything that doesn't is in the wrong project.

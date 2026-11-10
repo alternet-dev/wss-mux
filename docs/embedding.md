@@ -568,6 +568,37 @@ streams:
   staleness is worse than a gap, set `0` where dropping is never
   acceptable and you accept the memory tradeoff.
 
+### Per-stream selective relay
+
+A multi-instance deployment normally relays every producer event to
+every discovered peer. A stream whose subscribers are sparse across the
+fleet can opt into aggregate peer-interest filtering:
+
+```yaml
+version: 1
+streams:
+  - stream: tenant_events
+    subscribe: [tenant:*]
+    selective_relay: true
+```
+
+Absent or `false` keeps unconditional broadcast. Do not enable this
+automatically: first measure a sustained high
+`wss_mux_relay_events_unwanted_total` / `wss_mux_relay_events_relayed_total`
+ratio in the aggregate fleet workload, then use a representative load test,
+application knowledge, or external per-stream telemetry to choose a stream.
+The built-in counters are not labeled by stream. Interest changes become
+visible after a later refresh completes; the configured interval is a sleep
+after the prior cycle's discovery and peer-interest work, not a hard upper
+bound on that delay. A newly subscribed peer can miss events until then, and
+interest removal can cause only temporary extra peer relay traffic. Missing
+interest data fails open to broadcast.
+Selective filtering requires a fleet-shared
+`WSS_MUX_PEER_INTEREST_AUTH_TOKEN`, separate from the producer push token;
+without it, peers cannot read advertisements and continue broadcasting.
+The complete selection and operations model is in
+[docs/operations.md](operations.md#selective-relay-opt-in).
+
 ## Client SDKs
 
 The repo ships two first-party clients that hide the wire protocol
@@ -672,8 +703,8 @@ producer still pushes each event **once**, to any single instance:
 that instance dispatches to its own subscribers and relays the event
 to its discovered peers, so clients on every instance see it. This is
 **peer-relay** — built in, no producer-side broadcast, no external
-infrastructure. The producer contract is identical to the
-single-instance case.
+infrastructure. Streams may opt into selective peer relay as described
+above; the producer contract is identical to the single-instance case.
 
 Running a fleet is therefore an operations concern, not an embedding
 one. [docs/operations.md](operations.md) covers it end to end:

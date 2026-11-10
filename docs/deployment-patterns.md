@@ -70,8 +70,8 @@ Route client and producer traffic through the regular `ClusterIP` Service.
 Default kube-proxy iptables round-robin is enough to distribute new TCP
 connections in this case. Do not add an L7 load balancer or a key-aware
 routing layer just to improve this topology: peer-relay already supplies the
-needed fanout, and planned selective relay has little to save for a balanced
-broadcast audience ([#51](https://github.com/alternet-dev/wss-mux/issues/51)).
+needed fanout, and selective relay has little to save for a balanced
+broadcast audience.
 
 WebSocket connections are long-lived, so connection balancing is about the
 arrival of new connections rather than redistribution of existing ones. Check
@@ -95,9 +95,9 @@ can improve placement for this pattern, but it does not move established
 WebSockets and it is not a substitute for correcting explicit stickiness.
 
 Interest-based selective relay is likely valuable when this pattern is common,
-because the waste grows with fleet size. It is designed but not implemented;
-follow [#51](https://github.com/alternet-dev/wss-mux/issues/51) rather than
-expecting a current configuration switch to change relay behavior.
+because the waste grows with fleet size. After measuring a sustained benefit,
+set `selective_relay: true` for that stream and configure the separate
+fleet-shared peer-interest token described in [Operations](operations.md#selective-relay-opt-in).
 
 ## Keyed
 

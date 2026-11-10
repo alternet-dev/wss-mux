@@ -3,7 +3,7 @@ use std::process::ExitCode;
 
 use tokio::net::TcpListener;
 use tokio::signal::unix::{signal, SignalKind};
-use wss_mux::config::Config;
+use wss_mux::config::{Config, PeerConfig};
 use wss_mux::manifest::Manifest;
 use wss_mux::server::metrics::{ReloadResult, ReloadResultLabel};
 use wss_mux::server::{build_app, AppState};
@@ -106,27 +106,30 @@ async fn try_serve() -> anyhow::Result<()> {
 }
 
 /// Keep the peer set fresh. Membership is polled (not per-relay
-/// delivery): re-resolve discovery every `WSS_MUX_PEER_DNS_REFRESH_SECS`
-/// so scale-up/down propagates within a tight window. A static
-/// `WSS_MUX_PEERS` fleet is fixed — set once, never polled. Relay
-/// disabled (`WSS_MUX_PEER_RELAY=off`) ⇒ task not spawned, no DNS query.
+/// delivery): each cycle waits `WSS_MUX_PEER_DNS_REFRESH_SECS` after
+/// discovery and peer-interest work complete. Static `WSS_MUX_PEERS`
+/// skip DNS but remain on the loop so selective-relay interest stays
+/// fresh. Relay disabled (`WSS_MUX_PEER_RELAY=off`) ⇒ task not spawned,
+/// no DNS query or interest request.
+fn peer_refresh_interval(peer_cfg: &PeerConfig) -> Option<std::time::Duration> {
+    peer_cfg.relay_enabled.then_some(peer_cfg.dns_refresh)
+}
+
 fn spawn_peer_refresher(state: AppState) {
     let peer_cfg = state.config().peers.clone();
-    if !peer_cfg.relay_enabled {
+    let Some(refresh_interval) = peer_refresh_interval(&peer_cfg) else {
         tracing::info!("peer relay disabled (WSS_MUX_PEER_RELAY=off)");
         return;
-    }
+    };
     let self_port = state.config().listen_addr.port();
     tokio::spawn(async move {
         loop {
             let peers = wss_mux::peers::discover(&peer_cfg, self_port).await;
             let count = peers.len();
             state.set_peers(peers);
+            wss_mux::server::relay::refresh_peer_interests(&state).await;
             tracing::debug!(peers = count, "peer set refreshed");
-            if !peer_cfg.static_peers.is_empty() {
-                return; // fixed fleet — no polling
-            }
-            tokio::time::sleep(peer_cfg.dns_refresh).await;
+            tokio::time::sleep(refresh_interval).await;
         }
     });
 }
@@ -241,4 +244,38 @@ fn spawn_sighup_reloader(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use wss_mux::config::PeerConfig;
+    use wss_mux::peers::{PeerUrl, Scheme};
+
+    #[test]
+    fn static_peer_fleet_keeps_peer_refresher_active() {
+        let interval = Duration::from_secs(7);
+        let peer_cfg = PeerConfig {
+            static_peers: vec![PeerUrl {
+                scheme: Scheme::Http,
+                host: "peer.example".into(),
+                port: 8080,
+            }],
+            dns_refresh: interval,
+            ..PeerConfig::default()
+        };
+
+        assert_eq!(peer_refresh_interval(&peer_cfg), Some(interval));
+    }
+
+    #[test]
+    fn disabled_relay_has_no_peer_refresher_interval() {
+        let peer_cfg = PeerConfig {
+            relay_enabled: false,
+            ..PeerConfig::default()
+        };
+
+        assert_eq!(peer_refresh_interval(&peer_cfg), None);
+    }
 }

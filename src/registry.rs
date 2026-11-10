@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use std::collections::BTreeSet;
 
 pub type ConnId = u64;
 pub type SubId = String;
@@ -8,6 +9,15 @@ pub struct Binding {
     pub conn_id: ConnId,
     pub sub_id: SubId,
     pub key: Option<String>,
+}
+
+/// Aggregate interest for one stream. `all_keys` is true when a
+/// keyless subscription exists or the exact-key set crossed the
+/// caller's bound and must fail open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryInterest {
+    pub all_keys: bool,
+    pub keys: Vec<String>,
 }
 
 #[derive(Default)]
@@ -50,6 +60,38 @@ impl Registry {
 
     pub fn binding_count(&self, stream: &str) -> usize {
         self.streams.get(stream).map(|e| e.len()).unwrap_or(0)
+    }
+
+    /// Summarize local interest without exposing connection or
+    /// subscription identities. Exact keys are sorted and deduplicated.
+    /// Crossing `max_keys` collapses to `all_keys`, which can create
+    /// extra relay traffic but cannot suppress a wanted event.
+    pub fn interest(&self, stream: &str, max_keys: usize) -> Option<RegistryInterest> {
+        let bindings = self.streams.get(stream)?;
+        if bindings.is_empty() {
+            return None;
+        }
+        if bindings.iter().any(|binding| binding.key.is_none()) {
+            return Some(RegistryInterest {
+                all_keys: true,
+                keys: Vec::new(),
+            });
+        }
+
+        let mut keys = BTreeSet::new();
+        for key in bindings.iter().filter_map(|binding| binding.key.as_ref()) {
+            keys.insert(key.clone());
+            if keys.len() > max_keys {
+                return Some(RegistryInterest {
+                    all_keys: true,
+                    keys: Vec::new(),
+                });
+            }
+        }
+        Some(RegistryInterest {
+            all_keys: false,
+            keys: keys.into_iter().collect(),
+        })
     }
 }
 
@@ -158,5 +200,38 @@ mod tests {
             t.join().unwrap();
         }
         assert_eq!(r.binding_count("chat_messages"), 16 * 32);
+    }
+
+    #[test]
+    fn interest_is_sorted_deduplicated_and_key_specific() {
+        let r = Registry::new();
+        r.subscribe("chat_messages", 1, "s1".into(), Some("room-b".into()));
+        r.subscribe("chat_messages", 2, "s2".into(), Some("room-a".into()));
+        r.subscribe("chat_messages", 3, "s3".into(), Some("room-b".into()));
+        assert_eq!(
+            r.interest("chat_messages", 10),
+            Some(RegistryInterest {
+                all_keys: false,
+                keys: vec!["room-a".into(), "room-b".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn keyless_or_over_bound_interest_fails_open_to_all_keys() {
+        let r = Registry::new();
+        r.subscribe("keyless", 1, "s1".into(), None);
+        assert_eq!(
+            r.interest("keyless", 1),
+            Some(RegistryInterest {
+                all_keys: true,
+                keys: vec![],
+            })
+        );
+
+        r.subscribe("many", 1, "s1".into(), Some("a".into()));
+        r.subscribe("many", 2, "s2".into(), Some("b".into()));
+        assert!(r.interest("many", 1).unwrap().all_keys);
+        assert!(r.interest("missing", 1).is_none());
     }
 }

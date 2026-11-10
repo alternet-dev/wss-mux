@@ -94,6 +94,11 @@ pub struct OidcConfig {
 pub struct Config {
     pub listen_addr: SocketAddr,
     pub push_auth_token: String,
+    /// Optional bearer secret dedicated to internal peer-interest
+    /// advertisements. Keeping it distinct from the producer push
+    /// token prevents a producer from enumerating subscriber keys.
+    /// Unset disables interest snapshots and relay fails open.
+    pub peer_interest_auth_token: Option<String>,
     pub handshake_keys: HandshakeKeyConfig,
     /// OIDC validation, when `WSS_MUX_OIDC_ISSUER` is set (mutually
     /// exclusive with `handshake_keys`).
@@ -300,6 +305,7 @@ impl Config {
                 .parse()
                 .expect("DEFAULT_LISTEN_ADDR is a valid socket address"),
             push_auth_token,
+            peer_interest_auth_token: None,
             handshake_keys,
             oidc: None,
             manifest_path,
@@ -344,6 +350,9 @@ impl Config {
 
         let push_auth_token = get("WSS_MUX_PUSH_AUTH_TOKEN")
             .ok_or(ConfigError::Missing("WSS_MUX_PUSH_AUTH_TOKEN"))?;
+        let peer_interest_auth_token = get("WSS_MUX_PEER_INTEREST_AUTH_TOKEN")
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         let hs256_secret = get("WSS_MUX_HANDSHAKE_SIGNING_KEY");
         let ed25519_public_pem = match get("WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY") {
@@ -565,6 +574,7 @@ impl Config {
         Ok(Config {
             listen_addr,
             push_auth_token,
+            peer_interest_auth_token,
             handshake_keys,
             oidc,
             manifest_path,
@@ -631,6 +641,27 @@ mod tests {
         assert_eq!(cfg.envelope_stream_path, "stream");
         assert_eq!(cfg.envelope_key_path, "key");
         assert_eq!(cfg.envelope_payload_path, "payload");
+        assert!(cfg.peer_interest_auth_token.is_none());
+    }
+
+    #[test]
+    fn peer_interest_token_is_optional_and_trims_blank_values() {
+        let mut configured = minimal();
+        configured.push(("WSS_MUX_PEER_INTEREST_AUTH_TOKEN", " peer-secret "));
+        assert_eq!(
+            Config::from_getter(env(&configured))
+                .expect("config")
+                .peer_interest_auth_token
+                .as_deref(),
+            Some("peer-secret")
+        );
+
+        let mut blank = minimal();
+        blank.push(("WSS_MUX_PEER_INTEREST_AUTH_TOKEN", "  "));
+        assert!(Config::from_getter(env(&blank))
+            .expect("config")
+            .peer_interest_auth_token
+            .is_none());
     }
 
     #[test]

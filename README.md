@@ -141,6 +141,7 @@ All configuration is environment variables, read once at startup.
 | Var | Default | Meaning |
 |---|---|---|
 | `WSS_MUX_PUSH_AUTH_TOKEN` | — (required) | shared bearer secret for `POST /events*` |
+| `WSS_MUX_PEER_INTEREST_AUTH_TOKEN` | — | dedicated shared bearer for internal peer-interest advertisements; required fleet-wide to activate selective filtering, otherwise relay fails open |
 | `WSS_MUX_HANDSHAKE_SIGNING_KEY` | — | HS256 client-token secret; optional if an Ed25519 key is set |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY` | — | Ed25519 (EdDSA) client-token public key, inline PEM |
 | `WSS_MUX_HANDSHAKE_ED25519_PUBLIC_KEY_FILE` | — | path to the Ed25519 public-key PEM file (alternative to inline) |
@@ -213,7 +214,13 @@ Operational notes:
   to discovered peers so every subscriber sees it, with zero new
   infrastructure. Active by default, inert with no resolvable peers
   (byte-identical to single-instance). The conventional Kubernetes
-  deploy needs no peer configuration at all.
+  deploy needs no peer configuration at all. Streams with sparse peer
+  interest can opt into `selective_relay: true` in the manifest; the
+  default remains unconditional broadcast. Selective filtering also
+  requires a fleet-shared `WSS_MUX_PEER_INTEREST_AUTH_TOKEN`, distinct
+  from the producer token. See
+  [docs/operations.md](docs/operations.md#selective-relay-opt-in) for
+  the data gate and staleness tradeoff.
 
 The envelope-path and rate-limit knobs are detailed in
 [docs/embedding.md](docs/embedding.md); running multiple instances is

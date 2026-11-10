@@ -19,7 +19,7 @@ use crate::connection::{outbound_channel, ConnId, Outbound, OutboundRx};
 use crate::dispatcher::{dispatch, EventOrigin};
 use crate::envelope::{EnvelopePaths, EventEnvelope, ServerFrame};
 use crate::server::metrics::{RejectReason, RejectReasonLabel};
-use crate::server::relay::{spawn_relay, RelayBatch};
+use crate::server::relay::{spawn_relay, InterestRequest, InterestSnapshot, RelayBatch};
 use crate::server::AppState;
 
 const PRODUCER_ID_HEADER: &str = "x-producer-id";
@@ -277,6 +277,36 @@ pub async fn relay_receive(
 
     accept_events(&state, batch.events, HttpEventSource::Peer)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Advertise aggregate local subscription interest for the requested
+/// streams. This read surface has a dedicated peer credential because
+/// the producer token authorizes writes but must not enumerate keys.
+pub async fn relay_interest(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<impl IntoResponse, (StatusCode, &'static str)> {
+    let token = state.config().peer_interest_auth_token.as_deref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "peer interest authentication is not configured",
+    ))?;
+    authenticate(&headers, token)?;
+    let request: InterestRequest = ciborium::from_reader(body.as_ref())
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid CBOR interest request"))?;
+    let snapshot = InterestSnapshot::from_registry(state.registry(), &request.streams);
+    let mut response = Vec::new();
+    ciborium::into_writer(&snapshot, &mut response).map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "interest encoding failed",
+        )
+    })?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/cbor")],
+        response,
+    ))
 }
 
 /// `GET /events/:stream` — read events from a single stream as a

@@ -25,6 +25,10 @@ pub struct Stream {
     /// Same matching rules as `subscribe`.
     #[serde(default)]
     pub publish: Vec<String>,
+    /// Opt into peer-interest filtering for this stream. Absent/false
+    /// preserves unconditional relay to every discovered peer.
+    #[serde(default)]
+    pub selective_relay: bool,
     /// Optional per-stream payload cap, measured as the length of the
     /// JSON serialization of the event payload (stable regardless of
     /// the producer/relay wire codec). Absent ⇒ no cap. A push whose
@@ -293,6 +297,25 @@ streams:
         let m = Manifest::from_str(VALID, p()).expect("manifest");
         assert!(m.streams[0].publish.is_empty());
         assert!(m.streams[1].publish.is_empty());
+    }
+
+    #[test]
+    fn selective_relay_defaults_off_and_parses_opt_in() {
+        let m = Manifest::from_str(VALID, p()).expect("manifest");
+        assert!(!m.streams[0].selective_relay);
+
+        let opted_in = Manifest::from_str(
+            r#"
+version: 1
+streams:
+  - stream: chat_messages
+    subscribe: [role:member]
+    selective_relay: true
+"#,
+            p(),
+        )
+        .expect("manifest");
+        assert!(opted_in.stream("chat_messages").unwrap().selective_relay);
     }
 
     #[test]
