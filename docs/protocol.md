@@ -197,19 +197,26 @@ v1 release.
 `message` is human-readable diagnostic text. Clients must use `code`,
 not `message`, for program logic; message wording is not stable.
 
-| Code | When | Closes connection? |
-|---|---|---|
-| `unknown_frame_type` | client sent an unrecognized `type` | yes |
-| `bad_frame` | frame failed JSON parsing or schema | yes |
-| `unauthenticated` | non-auth frame before auth, or auth failed | yes |
-| `expired_token` | auth token's `exp` claim has passed | yes |
-| `unknown_stream` | subscribe or publish to a stream not in the manifest | no |
-| `unauthorized_subscribe` | principals do not intersect stream audience | no |
-| `unauthorized_publish` | principals do not intersect stream `publish` audience | no |
-| `duplicate_subscription_id` | subscribe with an `id` already in use | no |
-| `publish_payload_too_large` | publish payload exceeds the stream's `max_payload_bytes` | no |
-| `rate_limited` | inbound frame rate limit exceeded | no |
-| `overflow` | a subscription exceeded its send-queue depth | no |
+The `id` correlation column states what each code puts in the error
+frame's `id` field: `absent` means the field is omitted; `subscribe`,
+`publish`, or `subscription id` means the field is always present and
+echoes the id from the offending frame or the dropped subscription;
+`offending frame's id, if present` means the field is echoed when the
+offending frame carried an `id` and omitted otherwise.
+
+| Code | When | Closes connection? | `id` correlation |
+|---|---|---|---|
+| `unknown_frame_type` | client sent an unrecognized `type` | yes | absent |
+| `bad_frame` | frame failed JSON parsing or schema | yes | absent |
+| `unauthenticated` | non-auth frame before auth, or auth failed | yes | offending frame's `id`, if present |
+| `expired_token` | auth token's `exp` claim has passed | yes | absent |
+| `unknown_stream` | subscribe or publish to a stream not in the manifest | no | subscribe or publish `id` |
+| `unauthorized_subscribe` | principals do not intersect stream audience | no | subscribe `id` |
+| `unauthorized_publish` | principals do not intersect stream `publish` audience | no | publish `id` |
+| `duplicate_subscription_id` | subscribe with an `id` already in use | no | subscribe `id` |
+| `publish_payload_too_large` | publish payload exceeds the stream's `max_payload_bytes` | no | publish `id` |
+| `rate_limited` | inbound frame rate limit exceeded | no | offending frame's `id`, if present |
+| `overflow` | a subscription exceeded its send-queue depth | no | subscription `id` |
 
 Errors that close the connection use these fixed WebSocket close codes:
 
