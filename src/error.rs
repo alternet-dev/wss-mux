@@ -235,6 +235,26 @@ mod tests {
     }
 
     #[test]
+    fn close_codes_are_in_reserved_4400_range() {
+        let closing = [
+            ProtocolError::UnknownFrameType,
+            ProtocolError::BadFrame,
+            ProtocolError::Unauthenticated { id: None },
+            ProtocolError::ExpiredToken,
+        ];
+        for err in closing {
+            let code = err
+                .close_code()
+                .expect("closing variant must have a close code");
+            assert!(
+                (4400..=4499).contains(&code),
+                "{} close code {code} escapes the reserved 4400-4499 range",
+                err.code(),
+            );
+        }
+    }
+
+    #[test]
     fn close_codes_match_protocol_md() {
         assert_eq!(ProtocolError::UnknownFrameType.close_code(), Some(4400));
         assert_eq!(ProtocolError::BadFrame.close_code(), Some(4400));
