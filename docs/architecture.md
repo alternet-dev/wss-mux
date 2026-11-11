@@ -42,7 +42,10 @@ implementation.
 
 Accepts producer pushes on `POST /events` and the batched
 `POST /events/batch`. Bearer-token authenticated against a shared
-secret. Validates the event envelope, forwards to the dispatcher.
+secret. An optional `X-Producer-Id` becomes an opaque fairness key;
+absent headers resolve to one shared identity. The header does not
+authenticate a request and is not forwarded over peer relay. Validates the
+event envelope, forwards to the dispatcher.
 Stateless.
 
 An optional process-wide token bucket can reject authenticated producer
@@ -50,6 +53,11 @@ requests before validation with `503`, a whole-second `Retry-After`,
 and `Connection: close`. It is disabled by default and does not gate
 internal peer relay receipts, so it adds no producer backpressure until
 an operator explicitly configures it.
+
+The configuration layer reserves `WSS_MUX_PUSH_RATE` and
+`WSS_MUX_PUSH_BURST` for a future keyed producer-fairness limiter. This
+release parses and validates those settings but does not construct a keyed
+bucket, reject requests, or emit per-producer limiter metrics.
 
 `GET /events/:stream` exposes the same event stream as a
 Server-Sent Events response — the consumer story for backends that
