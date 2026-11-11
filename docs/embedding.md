@@ -31,14 +31,59 @@ The push token is a shared secret configured via
 `WSS_MUX_PUSH_AUTH_TOKEN`. Rotate by changing the env var and
 restarting.
 
+### Producer identity
+
+Each external push also has an opaque producer identity for fairness
+features. Supply it with `X-Producer-Id` on both single and batch pushes:
+
+```http
+X-Producer-Id: billing-api
+```
+
+The header does not authenticate or authorize a request; the shared bearer
+token remains the injection boundary. It is intended for an
+operator-controlled producer fleet, where producers that hold that token are
+trusted not to impersonate one another. Do not use it for audit identity or
+access control.
+
+The value must be 1–128 printable ASCII characters with no whitespace.
+An omitted header resolves to the shared identity `shared`, so existing
+producers keep their current behavior and share one fairness budget when a
+future fairness feature is enabled. For authenticated requests, invalid values
+return `400 Bad Request` unless an enabled overload limiter rejects the
+request first. Header validation runs after bearer authentication, so a
+request with missing or invalid credentials returns `401 Unauthorized`
+regardless of the header.
+Internal peer relays are not external producer pushes and have no producer
+identity.
+
 For batch efficiency:
 
 ```http
 POST /events/batch
 Authorization: Bearer <push-token>
+X-Producer-Id: billing-api
 
 { "events": [ {...}, {...}, ... ] }
 ```
+
+### Reserved per-producer push settings
+
+This release accepts the following startup settings to establish the
+configuration contract for a future per-producer push limiter. It does not
+currently enforce a per-producer budget: setting these variables does not
+change request handling, produce `429` responses, or add limiter metrics.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `WSS_MUX_PUSH_RATE` | `0` | unsigned rate value reserved for future enforcement; a nonzero value causes the burst setting to be parsed |
+| `WSS_MUX_PUSH_BURST` | `min(2 × RATE, 4,294,967,295)` | unsigned burst value reserved for future enforcement; must be greater than zero when the rate is nonzero |
+
+When `WSS_MUX_PUSH_RATE=0`, the burst setting is ignored. When the rate is
+nonzero and no burst is supplied, the parser defaults the burst to twice the
+rate, saturating at `4,294,967,295`. A supplied rate or active burst that is
+not an unsigned 32-bit integer fails startup; an active burst of zero also
+fails startup.
 
 ### Opt-in producer overload signal
 

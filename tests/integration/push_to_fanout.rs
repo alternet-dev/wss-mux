@@ -122,6 +122,7 @@ async fn push_with_wrong_bearer_token_is_401() {
     let resp = http
         .post(format!("http://{addr}/events"))
         .header("Authorization", "Bearer wrong-token")
+        .header("X-Producer-Id", "invalid producer")
         .json(&serde_json::json!({
             "stream": "chat_messages",
             "payload": {}
@@ -130,6 +131,82 @@ async fn push_with_wrong_bearer_token_is_401() {
         .await
         .expect("push");
     assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn batch_push_without_bearer_token_is_401_before_producer_identity_validation() {
+    let state = test_state_with_manifest();
+    let addr = spawn_server(state).await;
+
+    let http = reqwest::Client::new();
+    let resp = http
+        .post(format!("http://{addr}/events/batch"))
+        .header("X-Producer-Id", "invalid producer")
+        .json(&serde_json::json!({
+            "events": [{"stream": "chat_messages", "payload": {}}]
+        }))
+        .send()
+        .await
+        .expect("batch push");
+    assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn named_producer_identity_is_accepted_for_single_and_batch_pushes() {
+    let state = test_state_with_manifest();
+    let addr = spawn_server(state).await;
+    let http = reqwest::Client::new();
+
+    let single = http
+        .post(format!("http://{addr}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .header("X-Producer-Id", "billing-api")
+        .json(&serde_json::json!({"stream": "chat_messages", "payload": {}}))
+        .send()
+        .await
+        .expect("single push");
+    assert_eq!(single.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let batch = http
+        .post(format!("http://{addr}/events/batch"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .header("X-Producer-Id", "billing-api")
+        .json(&serde_json::json!({
+            "events": [{"stream": "chat_messages", "payload": {}}]
+        }))
+        .send()
+        .await
+        .expect("batch push");
+    assert_eq!(batch.status(), reqwest::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn invalid_producer_identity_is_rejected_for_single_and_batch_pushes() {
+    let state = test_state_with_manifest();
+    let addr = spawn_server(state).await;
+    let http = reqwest::Client::new();
+
+    let single = http
+        .post(format!("http://{addr}/events"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .header("X-Producer-Id", "billing api")
+        .json(&serde_json::json!({"stream": "chat_messages", "payload": {}}))
+        .send()
+        .await
+        .expect("single push");
+    assert_eq!(single.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    let batch = http
+        .post(format!("http://{addr}/events/batch"))
+        .header("Authorization", format!("Bearer {PUSH_TOKEN}"))
+        .header("X-Producer-Id", "billing api")
+        .json(&serde_json::json!({
+            "events": [{"stream": "chat_messages", "payload": {}}]
+        }))
+        .send()
+        .await
+        .expect("batch push");
+    assert_eq!(batch.status(), reqwest::StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
