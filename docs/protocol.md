@@ -188,23 +188,47 @@ otherwise.
 
 ## Error codes
 
-| Code | When | Closes connection? |
-|---|---|---|
-| `unknown_frame_type` | client sent an unrecognized `type` | yes |
-| `bad_frame` | frame failed JSON parsing or schema | yes |
-| `unauthenticated` | non-auth frame before auth, or auth failed | yes |
-| `expired_token` | auth token's `exp` claim has passed | yes |
-| `unknown_stream` | subscribe or publish to a stream not in the manifest | no |
-| `unauthorized_subscribe` | principals do not intersect stream audience | no |
-| `unauthorized_publish` | principals do not intersect stream `publish` audience | no |
-| `duplicate_subscription_id` | subscribe with an `id` already in use | no |
-| `publish_payload_too_large` | publish payload exceeds the stream's `max_payload_bytes` | no |
-| `rate_limited` | inbound frame rate limit exceeded | no |
-| `overflow` | a subscription exceeded its send-queue depth | no |
+`code` is the machine-readable error classification. The table below is
+the complete v1 taxonomy: each code string, its meaning, whether it
+closes the connection, and its `id` correlation behavior are stable
+parts of the wire contract. A server must not send an unlisted code in a
+v1 release.
 
-Errors that close the connection use WebSocket close code `4xxx`
-matching the error semantically (`4400` bad frame, `4401`
-unauthenticated).
+`message` is human-readable diagnostic text. Clients must use `code`,
+not `message`, for program logic; message wording is not stable.
+
+The `id` correlation column states what each code puts in the error
+frame's `id` field: `absent` means the field is omitted; `subscribe`,
+`publish`, or `subscription id` means the field is always present and
+echoes the id from the offending frame or the dropped subscription;
+`offending frame's id, if present` means the field is echoed when the
+offending frame carried an `id` and omitted otherwise.
+
+| Code | When | Closes connection? | `id` correlation |
+|---|---|---|---|
+| `unknown_frame_type` | client sent an unrecognized `type` | yes | absent |
+| `bad_frame` | frame failed JSON parsing or schema | yes | absent |
+| `unauthenticated` | non-auth frame before auth, or auth failed | yes | offending frame's `id`, if present |
+| `expired_token` | auth token's `exp` claim has passed | yes | absent |
+| `unknown_stream` | subscribe or publish to a stream not in the manifest | no | subscribe or publish `id` |
+| `unauthorized_subscribe` | principals do not intersect stream audience | no | subscribe `id` |
+| `unauthorized_publish` | principals do not intersect stream `publish` audience | no | publish `id` |
+| `duplicate_subscription_id` | subscribe with an `id` already in use | no | subscribe `id` |
+| `publish_payload_too_large` | publish payload exceeds the stream's `max_payload_bytes` | no | publish `id` |
+| `rate_limited` | inbound frame rate limit exceeded | no | offending frame's `id`, if present |
+| `overflow` | a subscription exceeded its send-queue depth | no | subscription `id` |
+
+Errors that close the connection use these fixed WebSocket close codes:
+
+| Error codes | Close code |
+|---|---|
+| `unknown_frame_type`, `bad_frame` | `4400` |
+| `unauthenticated`, `expired_token` | `4401` |
+
+wss-mux reserves `4400` through `4499` for application error closes.
+Every future error close remains in that range; unassigned values have
+no defined meaning. A new assignment, or a change to an existing
+assignment, requires a major release.
 
 `rate_limited` is keep-open: the offending frame is dropped (not
 processed), an `error` frame is returned (echoing the frame's `id`
@@ -357,5 +381,7 @@ these rules:
   unknown types if marked optional.
 - **Adding a field to an existing frame**: minor version. Old
   clients ignore unknown fields.
-- **Adding a new error code**: minor version.
+- **Adding a new error code or error close-code assignment**: major
+  version. The v1 error taxonomy is closed so typed clients may model it
+  exhaustively.
 - **Changing or removing anything**: major version.
